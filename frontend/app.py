@@ -1,4 +1,6 @@
 import streamlit as st
+import pandas as pd
+import requests
 
 
 def configure_page() -> None:
@@ -51,11 +53,58 @@ def render_platform_modules() -> None:
     )
 
 
+def render_citizen_issue_intake() -> None:
+    st.markdown("### Citizen Issue Intake")
+
+    api_base = "http://127.0.0.1:8000"
+
+    with st.form("issue_intake_form"):
+        title = st.text_input("Title")
+        description = st.text_area("Description")
+        location = st.text_input("Location")
+        urgency = st.selectbox("Urgency", ["Low", "Medium", "High"])
+
+        submitted = st.form_submit_button("Submit Issue")
+
+        if submitted:
+            payload = {
+                "title": title,
+                "description": description,
+                "location": location,
+                "urgency": urgency,
+            }
+            try:
+                response = requests.post(f"{api_base}/submit_issue", json=payload, timeout=5)
+                response.raise_for_status()
+            except requests.RequestException as exc:
+                st.error(f"Failed to submit issue: {exc}")
+            else:
+                st.success("Issue submitted successfully.")
+
+    st.markdown("#### Submitted Issues")
+
+    try:
+        issues_response = requests.get(f"{api_base}/issues", timeout=5)
+        issues_response.raise_for_status()
+        issues = issues_response.json()
+    except requests.RequestException as exc:
+        st.warning(f"Unable to load issues from backend: {exc}")
+        issues = []
+
+    if issues:
+        df = pd.DataFrame(issues)
+        st.dataframe(df, use_container_width=True)
+    else:
+        st.info("No issues have been submitted yet.")
+
+
 def main() -> None:
     configure_page()
     render_header()
     render_overview_metrics()
     render_platform_modules()
+    st.markdown("---")
+    render_citizen_issue_intake()
 
 
 if __name__ == "__main__":
