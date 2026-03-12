@@ -1,0 +1,11 @@
+from fastapi import FastAPI
+
+app = FastAPI(title="Governance Memory AI API")
+
+@app.get("/")
+def root():
+    return {"message": "Governance Memory AI API is running"}
+
+@app.get("/health")
+def health_check():
+    return {"status": "healthy"}
