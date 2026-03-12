@@ -3,6 +3,8 @@ from __future__ import annotations
 from fastapi import FastAPI
 from pydantic import BaseModel
 
+from backend.services.prioritization import calculate_priority
+
 
 # NOTE:
 # This module currently provides a minimal, in-memory implementation
@@ -36,6 +38,7 @@ class Issue(IssueInput):
     """
 
     id: int
+    priority_score: float
 
 
 # Temporary, in-memory storage for issues. This is deliberately simple and
@@ -64,7 +67,15 @@ def submit_issue(issue_input: IssueInput) -> Issue:
     """
 
     new_id = len(issues_db) + 1
-    issue = Issue(id=new_id, **issue_input.model_dump())
+
+    # Compute priority using the simple prioritization engine.
+    priority_score = calculate_priority(issue_input.model_dump())
+
+    issue = Issue(
+        id=new_id,
+        priority_score=priority_score,
+        **issue_input.model_dump(),
+    )
     issues_db.append(issue)
     return issue
 
@@ -78,7 +89,8 @@ def list_issues() -> list[Issue]:
     page, filter, and sort results from the persistence layer.
     """
 
-    return issues_db
+    # Return issues sorted by priority_score (highest first).
+    return sorted(issues_db, key=lambda issue: issue.priority_score, reverse=True)
 
 
 # Entry-point note:

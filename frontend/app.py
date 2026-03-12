@@ -81,7 +81,7 @@ def render_citizen_issue_intake() -> None:
             else:
                 st.success("Issue submitted successfully.")
 
-    st.markdown("#### Submitted Issues")
+    st.markdown("#### Top Priority Issues")
 
     try:
         issues_response = requests.get(f"{api_base}/issues", timeout=5)
@@ -93,7 +93,31 @@ def render_citizen_issue_intake() -> None:
 
     if issues:
         df = pd.DataFrame(issues)
-        st.dataframe(df, use_container_width=True)
+
+        # Ensure sorting by priority_score (backend already sorts, but keep
+        # this here in case the implementation changes).
+        if "priority_score" in df.columns:
+            df = df.sort_values("priority_score", ascending=False)
+
+        # Display top 3 issues with highest priority.
+        top_n = df.head(3)
+        if not top_n.empty:
+            for _, row in top_n.iterrows():
+                st.markdown(
+                    f"- **#{int(row.get('id', 0))} - {row.get('title', '')}**  "
+                    f"(Location: {row.get('location', 'N/A')}, "
+                    f"Urgency: {row.get('urgency', 'N/A')}, "
+                    f"Priority: {row.get('priority_score', 'N/A')})"
+                )
+        else:
+            st.info("No issues available to rank.")
+
+        st.markdown("#### Submitted Issues")
+
+        # Restrict columns to the key fields we care about.
+        display_columns = ["id", "title", "location", "urgency", "priority_score"]
+        existing_columns = [c for c in display_columns if c in df.columns]
+        st.dataframe(df[existing_columns], use_container_width=True)
     else:
         st.info("No issues have been submitted yet.")
 
