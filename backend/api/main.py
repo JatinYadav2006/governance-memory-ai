@@ -4,6 +4,8 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 
 from backend.services.prioritization import calculate_priority
+from backend.services.sentiment_service import analyze_sentiment
+from backend.services.trust_engine import calculate_trust_score
 from backend.services.vector_memory import add_memory, find_similar_cases
 
 
@@ -161,6 +163,26 @@ def memory_suggestions(payload: MemorySuggestionRequest) -> dict[str, object]:
 
     results = find_similar_cases(payload.issue_description)
     return {"results": results}
+
+
+@app.get("/trust_score", tags=["analytics"])
+def trust_score() -> dict[str, int]:
+    """
+    Compute a public trust score using the currently stored in-memory issues.
+
+    This endpoint runs sentiment analysis over issue descriptions and then
+    applies the trust scoring rules defined in the trust engine.
+    """
+
+    issue_dicts = [issue.model_dump() for issue in issues_db]
+
+    # Analyze sentiment for each issue description (prototype signal).
+    # The aggregated sentiment breakdown can be added to the response later.
+    for issue in issue_dicts:
+        _ = analyze_sentiment(str(issue.get("description", "")))
+
+    score = calculate_trust_score(issue_dicts)
+    return {"trust_score": score, "total_issues": len(issue_dicts)}
 
 
 # Entry-point note:

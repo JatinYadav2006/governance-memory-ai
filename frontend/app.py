@@ -3,6 +3,37 @@ import pandas as pd
 import requests
 
 
+API_BASE = "http://127.0.0.1:8000"
+
+
+def fetch_trust_score(api_base: str = API_BASE) -> tuple[int | None, int | None, str | None]:
+    """
+    Fetch the current trust score from the backend.
+
+    Returns: (trust_score, total_issues, error_message)
+    """
+
+    try:
+        resp = requests.get(f"{api_base}/trust_score", timeout=5)
+        resp.raise_for_status()
+        payload = resp.json()
+        return int(payload.get("trust_score")), int(payload.get("total_issues")), None
+    except Exception as exc:  # keep UI resilient in early prototype
+        return None, None, str(exc)
+
+
+def trust_indicator(trust_score: int) -> tuple[str, str]:
+    """
+    Return (color, label) for a trust score threshold.
+    """
+
+    if trust_score > 80:
+        return "#16a34a", "High"
+    if trust_score >= 50:
+        return "#ca8a04", "Moderate"
+    return "#dc2626", "Low"
+
+
 def configure_page() -> None:
     st.set_page_config(
         page_title="Governance Memory AI",
@@ -16,7 +47,36 @@ def render_header() -> None:
     st.markdown("---")
 
 
-def render_overview_metrics() -> None:
+def render_public_trust_analytics(trust_score: int | None, total_issues: int | None, error: str | None) -> None:
+    st.markdown("### Public Trust Analytics")
+
+    if error or trust_score is None or total_issues is None:
+        st.warning(f"Unable to load trust analytics from backend: {error or 'unknown error'}")
+        st.markdown("---")
+        return
+
+    color, label = trust_indicator(trust_score)
+
+    col_score, col_total, col_indicator = st.columns([1, 1, 1])
+    with col_score:
+        st.metric(label="Trust Score", value=str(trust_score))
+    with col_total:
+        st.metric(label="Total Issues", value=str(total_issues))
+    with col_indicator:
+        st.markdown("**Indicator**")
+        st.markdown(
+            f"<div style='display:flex;align-items:center;gap:8px;'>"
+            f"<span style='width:10px;height:10px;border-radius:999px;background:{color};display:inline-block;'></span>"
+            f"<span style='font-weight:600;color:{color};'>{label}</span>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+    st.progress(trust_score / 100.0)
+    st.markdown("---")
+
+
+def render_overview_metrics(public_trust_score: int | None) -> None:
     st.markdown("### Overview")
 
     col_open, col_resolved, col_trust = st.columns(3)
@@ -31,7 +91,7 @@ def render_overview_metrics() -> None:
         st.metric(label="Resolved Issues", value="0")
 
     with col_trust:
-        st.metric(label="Public Trust Score", value="N/A")
+        st.metric(label="Public Trust Score", value=str(public_trust_score) if public_trust_score is not None else "N/A")
 
     st.markdown("---")
 
@@ -56,7 +116,7 @@ def render_platform_modules() -> None:
 def render_citizen_issue_intake() -> None:
     st.markdown("### Citizen Issue Intake")
 
-    api_base = "http://127.0.0.1:8000"
+    api_base = API_BASE
 
     if "memory_suggestions" not in st.session_state:
         st.session_state["memory_suggestions"] = []
@@ -153,7 +213,11 @@ def render_citizen_issue_intake() -> None:
 def main() -> None:
     configure_page()
     render_header()
-    render_overview_metrics()
+
+    trust_score, total_issues, trust_error = fetch_trust_score()
+    render_public_trust_analytics(trust_score, total_issues, trust_error)
+    render_overview_metrics(trust_score)
+
     render_platform_modules()
     st.markdown("---")
     render_citizen_issue_intake()
