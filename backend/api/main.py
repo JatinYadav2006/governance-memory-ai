@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 
 from backend.services.prioritization import calculate_priority
+from backend.services.vector_memory import add_memory, find_similar_cases
 
 
 # NOTE:
@@ -44,6 +45,39 @@ class Issue(IssueInput):
 # Temporary, in-memory storage for issues. This is deliberately simple and
 # not suitable for production use; it will be replaced with a database layer.
 issues_db: list[Issue] = []
+
+
+class MemoryInput(BaseModel):
+    """
+    Input payload for storing a governance case in vector memory.
+
+    This will later be persisted and augmented with metadata (timestamps,
+    jurisdiction, department, verification status, etc.).
+    """
+
+    issue_title: str
+    issue_description: str
+    action_taken: str
+    outcome: str
+
+
+class MemorySuggestionRequest(BaseModel):
+    """
+    Input payload for requesting memory suggestions based on an issue description.
+    """
+
+    issue_description: str
+
+
+class MemoryCase(BaseModel):
+    """
+    JSON-safe view of a stored memory entry (embedding excluded).
+    """
+
+    issue_title: str
+    issue_description: str
+    action_taken: str
+    outcome: str
 
 
 app = FastAPI(title="Governance Memory AI API")
@@ -91,6 +125,42 @@ def list_issues() -> list[Issue]:
 
     # Return issues sorted by priority_score (highest first).
     return sorted(issues_db, key=lambda issue: issue.priority_score, reverse=True)
+
+
+@app.post("/add_memory", response_model=MemoryCase, tags=["memory"])
+def add_memory_case(payload: MemoryInput) -> MemoryCase:
+    """
+    Store a governance case in the in-memory vector memory store.
+
+    The embedding is generated server-side and stored internally, but omitted
+    from the API response to keep payloads JSON-safe and lightweight.
+    """
+
+    entry = add_memory(
+        issue_title=payload.issue_title,
+        issue_description=payload.issue_description,
+        action_taken=payload.action_taken,
+        outcome=payload.outcome,
+    )
+
+    return MemoryCase(
+        issue_title=entry.get("issue_title", ""),
+        issue_description=entry.get("issue_description", ""),
+        action_taken=entry.get("action_taken", ""),
+        outcome=entry.get("outcome", ""),
+    )
+
+
+@app.post("/memory_suggestions", tags=["memory"])
+def memory_suggestions(payload: MemorySuggestionRequest) -> dict[str, object]:
+    """
+    Return the top similar governance cases for a given issue description.
+
+    This is a prototype retrieval endpoint (in-memory + cosine similarity).
+    """
+
+    results = find_similar_cases(payload.issue_description)
+    return {"results": results}
 
 
 # Entry-point note:

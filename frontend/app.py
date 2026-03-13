@@ -58,6 +58,9 @@ def render_citizen_issue_intake() -> None:
 
     api_base = "http://127.0.0.1:8000"
 
+    if "memory_suggestions" not in st.session_state:
+        st.session_state["memory_suggestions"] = []
+
     with st.form("issue_intake_form"):
         title = st.text_input("Title")
         description = st.text_area("Description")
@@ -80,6 +83,31 @@ def render_citizen_issue_intake() -> None:
                 st.error(f"Failed to submit issue: {exc}")
             else:
                 st.success("Issue submitted successfully.")
+                try:
+                    suggestions_response = requests.post(
+                        f"{api_base}/memory_suggestions",
+                        json={"issue_description": description},
+                        timeout=10,
+                    )
+                    suggestions_response.raise_for_status()
+                    st.session_state["memory_suggestions"] = suggestions_response.json().get("results", [])[:3]
+                except requests.RequestException as exc:
+                    st.session_state["memory_suggestions"] = []
+                    st.warning(f"Unable to fetch governance memory insights: {exc}")
+
+    suggestions = st.session_state.get("memory_suggestions") or []
+    if suggestions:
+        st.markdown("#### Governance Memory Insights")
+        st.caption("Similar past cases based on semantic similarity (prototype).")
+
+        for idx, suggestion in enumerate(suggestions, start=1):
+            st.markdown(
+                f"**Suggestion {idx}**\n\n"
+                f"- **Past Issue Title**: {suggestion.get('issue_title', 'N/A')}\n"
+                f"- **Action Taken**: {suggestion.get('action_taken', 'N/A')}\n"
+                f"- **Outcome**: {suggestion.get('outcome', 'N/A')}"
+            )
+            st.divider()
 
     st.markdown("#### Top Priority Issues")
 

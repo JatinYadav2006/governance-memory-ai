@@ -7,3 +7,5 @@ scikit-learn
 requests
 python-multipart
 pydantic
+sentence-transformers
+scipy
