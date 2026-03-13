@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+from pathlib import Path
+from uuid import uuid4
+
 from fastapi import FastAPI
+from fastapi import File, Form, UploadFile
 from pydantic import BaseModel
 
 from backend.services.prioritization import calculate_priority
@@ -8,6 +12,7 @@ from backend.services.communication_generator import generate_public_update
 from backend.services.sentiment_service import analyze_sentiment
 from backend.services.trust_engine import calculate_trust_score
 from backend.services.vector_memory import add_memory, find_similar_cases
+from backend.services.work_verification import get_verifications, verify_work
 
 
 # NOTE:
@@ -84,6 +89,9 @@ class MemoryCase(BaseModel):
 
 
 app = FastAPI(title="Governance Memory AI API")
+
+UPLOADS_DIR = Path("uploads")
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 @app.get("/", tags=["meta"])
@@ -197,6 +205,39 @@ def generate_update(payload: IssueInput) -> dict[str, str]:
 
     update_text = generate_public_update(payload.model_dump())
     return {"generated_update": update_text}
+
+
+@app.post("/verify_work", tags=["verification"])
+async def verify_work_upload(
+    issue_id: int = Form(...),
+    location: str = Form(...),
+    image: UploadFile = File(...),
+) -> dict[str, object]:
+    """
+    Upload a verification image for a resolved/handled issue.
+
+    - Saves the uploaded file to `uploads/`
+    - Records a verification entry in the in-memory verification service
+    """
+
+    suffix = Path(image.filename or "").suffix
+    saved_filename = f"issue_{issue_id}_{uuid4().hex}{suffix}"
+    saved_path = UPLOADS_DIR / saved_filename
+
+    content = await image.read()
+    saved_path.write_bytes(content)
+
+    record = verify_work(issue_id=issue_id, image_filename=saved_filename, location=location)
+    return {"verification": record}
+
+
+@app.get("/verifications", tags=["verification"])
+def verifications() -> dict[str, object]:
+    """
+    Return all work verification records stored in memory.
+    """
+
+    return {"verifications": get_verifications()}
 
 
 # Entry-point note:

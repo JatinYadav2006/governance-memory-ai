@@ -268,6 +268,82 @@ def render_ai_communication_generator() -> None:
         )
 
 
+def render_work_verification() -> None:
+    st.markdown("### Work Verification")
+    st.caption("Upload proof-of-work for a selected issue (prototype).")
+
+    try:
+        issues_response = requests.get(f"{API_BASE}/issues", timeout=5)
+        issues_response.raise_for_status()
+        issues = issues_response.json()
+    except requests.RequestException as exc:
+        st.warning(f"Unable to load issues from backend: {exc}")
+        issues = []
+
+    if issues:
+        def issue_label(issue: dict) -> str:
+            issue_id = issue.get("id", "N/A")
+            title = issue.get("title", "Untitled")
+            location = issue.get("location", "N/A")
+            return f"#{issue_id} • {title} • {location}"
+
+        with st.form("work_verification_form"):
+            selected_issue = st.selectbox(
+                "Select issue",
+                options=issues,
+                format_func=issue_label,
+            )
+            location = st.text_input("Location")
+            image_file = st.file_uploader("Upload verification image", type=["png", "jpg", "jpeg", "webp"])
+
+            submitted = st.form_submit_button("Submit Verification")
+            if submitted:
+                if image_file is None:
+                    st.error("Please upload an image to submit verification.")
+                else:
+                    data = {
+                        "issue_id": str(selected_issue.get("id")),
+                        "location": location,
+                    }
+                    files = {
+                        "image": (image_file.name, image_file.getvalue(), image_file.type or "application/octet-stream"),
+                    }
+                    try:
+                        resp = requests.post(f"{API_BASE}/verify_work", data=data, files=files, timeout=20)
+                        resp.raise_for_status()
+                    except requests.RequestException as exc:
+                        st.error(f"Failed to submit verification: {exc}")
+                    else:
+                        st.success("Verification submitted successfully.")
+    else:
+        st.info("Submit an issue first to upload a work verification.")
+
+    st.markdown("#### Verification Records")
+
+    try:
+        resp = requests.get(f"{API_BASE}/verifications", timeout=5)
+        resp.raise_for_status()
+        records = (resp.json() or {}).get("verifications", [])
+    except requests.RequestException as exc:
+        st.warning(f"Unable to load verification records: {exc}")
+        records = []
+
+    if records:
+        df = pd.DataFrame(records)
+        rename_map = {
+            "issue_id": "Issue ID",
+            "location": "Location",
+            "timestamp": "Timestamp",
+            "image_filename": "Image filename",
+        }
+        df = df.rename(columns=rename_map)
+        display_cols = ["Issue ID", "Location", "Timestamp", "Image filename"]
+        existing_cols = [c for c in display_cols if c in df.columns]
+        st.dataframe(df[existing_cols], use_container_width=True)
+    else:
+        st.info("No verification records yet.")
+
+
 def main() -> None:
     configure_page()
     render_header()
@@ -281,6 +357,8 @@ def main() -> None:
     render_citizen_issue_intake()
     st.markdown("---")
     render_ai_communication_generator()
+    st.markdown("---")
+    render_work_verification()
 
 
 if __name__ == "__main__":
