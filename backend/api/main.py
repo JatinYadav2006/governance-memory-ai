@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 
 from backend.services.prioritization import calculate_priority
+from backend.services.communication_generator import generate_public_update
 from backend.services.sentiment_service import analyze_sentiment
 from backend.services.trust_engine import calculate_trust_score
 from backend.services.vector_memory import add_memory, find_similar_cases
@@ -183,6 +184,19 @@ def trust_score() -> dict[str, int]:
 
     score = calculate_trust_score(issue_dicts)
     return {"trust_score": score, "total_issues": len(issue_dicts)}
+
+
+@app.post("/generate_update", tags=["communication"])
+def generate_update(payload: IssueInput) -> dict[str, str]:
+    """
+    Generate a public-facing announcement message for a given issue payload.
+
+    This uses a simple template-based generator for now and can later be
+    upgraded to LLM-backed generation with policy controls.
+    """
+
+    update_text = generate_public_update(payload.model_dump())
+    return {"generated_update": update_text}
 
 
 # Entry-point note:

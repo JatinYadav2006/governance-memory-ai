@@ -210,6 +210,64 @@ def render_citizen_issue_intake() -> None:
         st.info("No issues have been submitted yet.")
 
 
+def render_ai_communication_generator() -> None:
+    st.markdown("### AI Communication Generator")
+    st.caption("Generate a public-facing update for a submitted issue.")
+
+    try:
+        issues_response = requests.get(f"{API_BASE}/issues", timeout=5)
+        issues_response.raise_for_status()
+        issues = issues_response.json()
+    except requests.RequestException as exc:
+        st.warning(f"Unable to load issues from backend: {exc}")
+        return
+
+    if not issues:
+        st.info("Submit an issue first to generate a public update.")
+        return
+
+    def issue_label(issue: dict) -> str:
+        issue_id = issue.get("id", "N/A")
+        title = issue.get("title", "Untitled")
+        location = issue.get("location", "N/A")
+        urgency = issue.get("urgency", "N/A")
+        return f"#{issue_id} • {title} • {location} • {urgency}"
+
+    selected = st.selectbox(
+        "Select an issue",
+        options=issues,
+        format_func=issue_label,
+    )
+
+    if st.button("Generate Public Update", type="primary"):
+        try:
+            resp = requests.post(f"{API_BASE}/generate_update", json=selected, timeout=10)
+            resp.raise_for_status()
+            update_text = resp.json().get("generated_update", "")
+        except requests.RequestException as exc:
+            st.error(f"Failed to generate public update: {exc}")
+            return
+
+        if not update_text:
+            st.warning("No update text returned by the backend.")
+            return
+
+        st.markdown("#### Generated Public Update")
+        st.markdown(
+            f"""
+            <div style="
+                padding: 14px 16px;
+                border: 1px solid rgba(120,120,120,0.35);
+                border-radius: 10px;
+                background: rgba(240,240,240,0.35);
+                line-height: 1.55;
+                white-space: pre-wrap;
+            ">{update_text}</div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
 def main() -> None:
     configure_page()
     render_header()
@@ -221,6 +279,8 @@ def main() -> None:
     render_platform_modules()
     st.markdown("---")
     render_citizen_issue_intake()
+    st.markdown("---")
+    render_ai_communication_generator()
 
 
 if __name__ == "__main__":
