@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from backend.services.prioritization import calculate_priority
 from backend.services.communication_generator import generate_public_update
+from backend.services.analytics_service import generate_issue_statistics
 from backend.services.sentiment_service import analyze_sentiment
 from backend.services.trust_engine import calculate_trust_score
 from backend.services.vector_memory import add_memory, find_similar_cases
@@ -192,6 +193,19 @@ def trust_score() -> dict[str, int]:
 
     score = calculate_trust_score(issue_dicts)
     return {"trust_score": score, "total_issues": len(issue_dicts)}
+
+
+@app.get("/analytics", tags=["analytics"])
+def analytics() -> dict[str, object]:
+    """
+    Return high-level statistics for issues currently stored in memory.
+
+    This powers the leadership dashboard with counts by urgency and category.
+    """
+
+    issue_dicts = [issue.model_dump() for issue in issues_db]
+    stats = generate_issue_statistics(issue_dicts)
+    return stats
 
 
 @app.post("/generate_update", tags=["communication"])

@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import requests
+import plotly.express as px
 
 
 API_BASE = "http://127.0.0.1:8000"
@@ -112,6 +113,63 @@ def render_platform_modules() -> None:
         """
     )
 
+
+def render_leadership_analytics() -> None:
+    st.markdown("### Leadership Analytics")
+    st.caption("High-level view of citizen issues by category and urgency.")
+
+    try:
+        resp = requests.get(f"{API_BASE}/analytics", timeout=5)
+        resp.raise_for_status()
+        analytics = resp.json() or {}
+    except requests.RequestException as exc:
+        st.warning(f"Unable to load analytics from backend: {exc}")
+        return
+
+    total_issues = analytics.get("total_issues", 0)
+    by_category = analytics.get("by_category", {})
+    by_urgency = analytics.get("by_urgency", {})
+
+    cols = st.columns(3)
+    with cols[0]:
+        st.metric("Total Issues", str(total_issues))
+
+    # Category bar chart
+    if by_category:
+        cat_df = pd.DataFrame(
+            {"Category": list(by_category.keys()), "Count": list(by_category.values())}
+        )
+        fig_cat = px.bar(
+            cat_df,
+            x="Category",
+            y="Count",
+            title="Issues by Category",
+            color="Category",
+            text="Count",
+        )
+        fig_cat.update_layout(showlegend=False, margin=dict(l=10, r=10, t=40, b=10))
+        fig_cat.update_traces(textposition="outside")
+        st.plotly_chart(fig_cat, use_container_width=True)
+    else:
+        st.info("No category data available yet.")
+
+    # Urgency pie chart
+    if by_urgency:
+        urg_df = pd.DataFrame(
+            {"Urgency": list(by_urgency.keys()), "Count": list(by_urgency.values())}
+        )
+        fig_urg = px.pie(
+            urg_df,
+            names="Urgency",
+            values="Count",
+            title="Urgency Distribution",
+        )
+        fig_urg.update_layout(margin=dict(l=10, r=10, t=40, b=10))
+        st.plotly_chart(fig_urg, use_container_width=True)
+    else:
+        st.info("No urgency data available yet.")
+
+    st.markdown("---")
 
 def render_citizen_issue_intake() -> None:
     st.markdown("### Citizen Issue Intake")
@@ -351,6 +409,8 @@ def main() -> None:
     trust_score, total_issues, trust_error = fetch_trust_score()
     render_public_trust_analytics(trust_score, total_issues, trust_error)
     render_overview_metrics(trust_score)
+
+    render_leadership_analytics()
 
     render_platform_modules()
     st.markdown("---")
