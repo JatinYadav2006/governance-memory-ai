@@ -7,63 +7,40 @@ from fastapi import FastAPI
 from fastapi import File, Form, UploadFile
 from pydantic import BaseModel
 
-from backend.services.prioritization import calculate_priority
-from backend.services.communication_generator import generate_public_update
+from backend.ai.crisis_detection import detect_crisis
+from backend.ai.governance_memory import find_similar_case
+from backend.ai.governance_insights import generate_cluster_insight
+from backend.ai.issue_clustering import cluster_issues
+from backend.ai.policy_recommendation import generate_policy_recommendation
+from backend.auth.auth_routes import router as auth_router
+from backend.auth.auth_service import seed_demo_admin
+from backend.db.database import IssueRecord, SessionLocal, VerificationRecord, init_db
 from backend.services.analytics_service import generate_issue_statistics
+from backend.services.communication_generator import generate_public_update
+from backend.services.issue_storage import create_issue, list_issues
+from backend.services.prioritization import calculate_priority
 from backend.services.sentiment_service import analyze_sentiment
+from backend.services.trend_analysis import detect_issue_trends
 from backend.services.trust_engine import calculate_trust_score
 from backend.services.vector_memory import add_memory, find_similar_cases
 from backend.services.work_verification import get_verifications, verify_work
 
 
-# NOTE:
-# This module currently provides a minimal, in-memory implementation
-# for accepting and listing citizen issues. It will later be extended
-# with proper routing, domain models, business logic, and persistence:
-# - `backend/api/routes/` for versioned routers (e.g., /v1/issues, /v1/analytics)
-# - `backend/models/` for richer domain models and schemas
-# - `backend/logic/` for governance intelligence pipelines
-# - `backend/database/` for persistence and governance memory storage layers
-
-
 class IssueInput(BaseModel):
-    """
-    Input payload for a citizen-reported issue/complaint.
-
-    This represents the data a client must send when submitting a new issue.
-    """
-
     title: str
     description: str
     location: str
     urgency: str
+    image_filename: str | None = None
 
 
 class Issue(IssueInput):
-    """
-    Persisted representation of an issue with a server-assigned identifier.
-
-    For now, this is stored in memory only. A proper database-backed model
-    will replace this once persistence is introduced.
-    """
-
     id: int
+    status: str = "Open"
     priority_score: float
 
 
-# Temporary, in-memory storage for issues. This is deliberately simple and
-# not suitable for production use; it will be replaced with a database layer.
-issues_db: list[Issue] = []
-
-
 class MemoryInput(BaseModel):
-    """
-    Input payload for storing a governance case in vector memory.
-
-    This will later be persisted and augmented with metadata (timestamps,
-    jurisdiction, department, verification status, etc.).
-    """
-
     issue_title: str
     issue_description: str
     action_taken: str
@@ -71,18 +48,10 @@ class MemoryInput(BaseModel):
 
 
 class MemorySuggestionRequest(BaseModel):
-    """
-    Input payload for requesting memory suggestions based on an issue description.
-    """
-
     issue_description: str
 
 
 class MemoryCase(BaseModel):
-    """
-    JSON-safe view of a stored memory entry (embedding excluded).
-    """
-
     issue_title: str
     issue_description: str
     action_taken: str
@@ -90,9 +59,60 @@ class MemoryCase(BaseModel):
 
 
 app = FastAPI(title="Governance Memory AI API")
+app.include_router(auth_router)
 
 UPLOADS_DIR = Path("uploads")
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+
+init_db()
+seed_demo_admin()
+
+
+def get_issue_dicts() -> list[dict[str, object]]:
+    return list_issues()
+
+
+def get_resolved_issue_dicts() -> list[dict[str, object]]:
+    return list_issues(status="Resolved")
+
+
+def _cluster_input_from_issues(issues: list[dict[str, object]]) -> list[dict[str, object]]:
+    return [
+        {
+            "id": issue.get("id"),
+            "title": issue.get("title", ""),
+            "description": issue.get("description", ""),
+            "location": issue.get("location", ""),
+        }
+        for issue in issues
+    ]
+
+
+def _get_resolved_issues() -> list[dict[str, object]]:
+    session = SessionLocal()
+    try:
+        verification_records = (
+            session.query(VerificationRecord, IssueRecord)
+            .join(IssueRecord, VerificationRecord.issue_id == IssueRecord.id)
+            .filter(VerificationRecord.action_taken.is_not(None))
+            .order_by(VerificationRecord.timestamp.desc())
+            .all()
+        )
+
+        resolved_by_issue_id: dict[int, dict[str, object]] = {}
+        for verification_record, issue_record in verification_records:
+            if issue_record.id in resolved_by_issue_id:
+                continue
+            resolved_by_issue_id[issue_record.id] = {
+                "title": issue_record.title,
+                "description": issue_record.description,
+                "location": issue_record.location,
+                "action_taken": verification_record.action_taken,
+            }
+
+        return list(resolved_by_issue_id.values())
+    finally:
+        session.close()
 
 
 @app.get("/", tags=["meta"])
@@ -107,47 +127,23 @@ def health() -> dict[str, str]:
 
 @app.post("/submit_issue", response_model=Issue, tags=["issues"])
 def submit_issue(issue_input: IssueInput) -> Issue:
-    """
-    Accept a new citizen issue, assign a unique identifier, store it in
-    the in-memory collection, and return the stored issue.
-    """
-
-    new_id = len(issues_db) + 1
-
-    # Compute priority using the simple prioritization engine.
     priority_score = calculate_priority(issue_input.model_dump())
-
-    issue = Issue(
-        id=new_id,
-        priority_score=priority_score,
-        **issue_input.model_dump(),
-    )
-    issues_db.append(issue)
-    return issue
+    issue_payload = create_issue(issue_input.model_dump(), priority_score)
+    return Issue(**issue_payload)
 
 
 @app.get("/issues", response_model=list[Issue], tags=["issues"])
-def list_issues() -> list[Issue]:
-    """
-    Return all issues currently stored in the in-memory collection.
+def list_all_issues() -> list[Issue]:
+    return [Issue(**issue) for issue in list_issues()]
 
-    Once a real database is introduced, this endpoint will be updated to
-    page, filter, and sort results from the persistence layer.
-    """
 
-    # Return issues sorted by priority_score (highest first).
-    return sorted(issues_db, key=lambda issue: issue.priority_score, reverse=True)
+@app.get("/issues/history", response_model=list[Issue], tags=["issues"])
+def list_resolved_issues() -> list[Issue]:
+    return [Issue(**issue) for issue in get_resolved_issue_dicts()]
 
 
 @app.post("/add_memory", response_model=MemoryCase, tags=["memory"])
 def add_memory_case(payload: MemoryInput) -> MemoryCase:
-    """
-    Store a governance case in the in-memory vector memory store.
-
-    The embedding is generated server-side and stored internally, but omitted
-    from the API response to keep payloads JSON-safe and lightweight.
-    """
-
     entry = add_memory(
         issue_title=payload.issue_title,
         issue_description=payload.issue_description,
@@ -165,29 +161,12 @@ def add_memory_case(payload: MemoryInput) -> MemoryCase:
 
 @app.post("/memory_suggestions", tags=["memory"])
 def memory_suggestions(payload: MemorySuggestionRequest) -> dict[str, object]:
-    """
-    Return the top similar governance cases for a given issue description.
-
-    This is a prototype retrieval endpoint (in-memory + cosine similarity).
-    """
-
-    results = find_similar_cases(payload.issue_description)
-    return {"results": results}
+    return {"results": find_similar_cases(payload.issue_description)}
 
 
 @app.get("/trust_score", tags=["analytics"])
 def trust_score() -> dict[str, int]:
-    """
-    Compute a public trust score using the currently stored in-memory issues.
-
-    This endpoint runs sentiment analysis over issue descriptions and then
-    applies the trust scoring rules defined in the trust engine.
-    """
-
-    issue_dicts = [issue.model_dump() for issue in issues_db]
-
-    # Analyze sentiment for each issue description (prototype signal).
-    # The aggregated sentiment breakdown can be added to the response later.
+    issue_dicts = get_issue_dicts()
     for issue in issue_dicts:
         _ = analyze_sentiment(str(issue.get("description", "")))
 
@@ -197,43 +176,99 @@ def trust_score() -> dict[str, int]:
 
 @app.get("/analytics", tags=["analytics"])
 def analytics() -> dict[str, object]:
-    """
-    Return high-level statistics for issues currently stored in memory.
+    return generate_issue_statistics(get_issue_dicts())
 
-    This powers the leadership dashboard with counts by urgency and category.
-    """
 
-    issue_dicts = [issue.model_dump() for issue in issues_db]
-    stats = generate_issue_statistics(issue_dicts)
-    return stats
+@app.get("/issue_trends", tags=["analytics"])
+def issue_trends() -> dict[str, object]:
+    return {"trends": detect_issue_trends(get_issue_dicts())}
+
+
+@app.get("/issue_clusters", tags=["analytics"])
+def issue_clusters() -> list[dict[str, object]]:
+    issues = get_issue_dicts()
+    return cluster_issues(_cluster_input_from_issues(issues))
+
+
+@app.get("/ai_insights", tags=["analytics"])
+def ai_insights() -> list[dict[str, str]]:
+    issues = get_issue_dicts()
+    clusters = cluster_issues(_cluster_input_from_issues(issues))
+    return [generate_cluster_insight(cluster) for cluster in clusters]
+
+
+@app.get("/crisis_alerts", tags=["analytics"])
+def crisis_alerts() -> list[dict[str, str]]:
+    issues = get_issue_dicts()
+    clusters = cluster_issues(_cluster_input_from_issues(issues))
+    return detect_crisis(clusters)
+
+
+@app.get("/policy_recommendations", tags=["analytics"])
+def policy_recommendations() -> list[dict[str, object]]:
+    issues = get_issue_dicts()
+    clusters = cluster_issues(_cluster_input_from_issues(issues))
+    return [generate_policy_recommendation(cluster) for cluster in clusters]
+
+
+@app.get("/governance_memory", tags=["analytics"])
+def governance_memory() -> list[dict[str, object]]:
+    issues = get_issue_dicts()
+    clusters = cluster_issues(_cluster_input_from_issues(issues))
+    resolved_issues = _get_resolved_issues()
+    issues_by_id = {
+        int(issue["id"]): issue
+        for issue in issues
+        if issue.get("id") is not None
+    }
+
+    memory_results: list[dict[str, object]] = []
+    for cluster in clusters:
+        cluster_issue_texts: list[str] = []
+        for issue_id in cluster.get("issue_ids", []):
+            issue = issues_by_id.get(int(issue_id))
+            if issue is None:
+                continue
+            title = str(issue.get("title", "")).strip()
+            description = str(issue.get("description", "")).strip()
+            combined_text = f"{title} {description}".strip()
+            if combined_text:
+                cluster_issue_texts.append(combined_text)
+
+        cluster_description = " ".join(cluster_issue_texts)
+        similar_case = find_similar_case(
+            str(cluster.get("cluster_title", "")),
+            cluster_description,
+            resolved_issues,
+        )
+        if similar_case is None:
+            continue
+
+        memory_results.append(
+            {
+                "cluster_title": cluster.get("cluster_title", "General issue cluster"),
+                "location": cluster.get("location", "Unknown"),
+                "similar_case": similar_case.get("similar_case_title", "Unknown"),
+                "action_taken": similar_case.get("action_taken", "No action recorded"),
+                "similarity_score": similar_case.get("similarity_score", 0.0),
+            }
+        )
+
+    return memory_results
 
 
 @app.post("/generate_update", tags=["communication"])
 def generate_update(payload: IssueInput) -> dict[str, str]:
-    """
-    Generate a public-facing announcement message for a given issue payload.
-
-    This uses a simple template-based generator for now and can later be
-    upgraded to LLM-backed generation with policy controls.
-    """
-
-    update_text = generate_public_update(payload.model_dump())
-    return {"generated_update": update_text}
+    return {"generated_update": generate_public_update(payload.model_dump())}
 
 
 @app.post("/verify_work", tags=["verification"])
 async def verify_work_upload(
     issue_id: int = Form(...),
     location: str = Form(...),
+    action_taken: str | None = Form(None),
     image: UploadFile = File(...),
 ) -> dict[str, object]:
-    """
-    Upload a verification image for a resolved/handled issue.
-
-    - Saves the uploaded file to `uploads/`
-    - Records a verification entry in the in-memory verification service
-    """
-
     suffix = Path(image.filename or "").suffix
     saved_filename = f"issue_{issue_id}_{uuid4().hex}{suffix}"
     saved_path = UPLOADS_DIR / saved_filename
@@ -241,18 +276,15 @@ async def verify_work_upload(
     content = await image.read()
     saved_path.write_bytes(content)
 
-    record = verify_work(issue_id=issue_id, image_filename=saved_filename, location=location)
+    record = verify_work(
+        issue_id=issue_id,
+        image_filename=saved_filename,
+        location=location,
+        action_taken=action_taken,
+    )
     return {"verification": record}
 
 
 @app.get("/verifications", tags=["verification"])
 def verifications() -> dict[str, object]:
-    """
-    Return all work verification records stored in memory.
-    """
-
     return {"verifications": get_verifications()}
-
-
-# Entry-point note:
-# Run locally with: `uvicorn backend.api.main:app --reload`

@@ -7,5 +7,7 @@ scikit-learn
 requests
 python-multipart
 pydantic
+email-validator
+sqlalchemy
 sentence-transformers
 scipy
