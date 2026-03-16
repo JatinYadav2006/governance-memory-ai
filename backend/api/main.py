@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI
 from fastapi import File, Form, UploadFile
+from fastapi import HTTPException
 from pydantic import BaseModel
 
 from backend.ai.crisis_detection import detect_crisis
@@ -12,11 +13,13 @@ from backend.ai.governance_memory import find_similar_case
 from backend.ai.governance_insights import generate_cluster_insight
 from backend.ai.issue_clustering import cluster_issues
 from backend.ai.policy_recommendation import generate_policy_recommendation
+from backend.ai.war_room import build_war_room
 from backend.auth.auth_routes import router as auth_router
 from backend.auth.auth_service import seed_demo_admin
 from backend.db.database import IssueRecord, SessionLocal, VerificationRecord, init_db
 from backend.services.analytics_service import generate_issue_statistics
 from backend.services.communication_generator import generate_public_update
+from backend.services.demo_seed import seed_demo_data
 from backend.services.issue_storage import create_issue, list_issues
 from backend.services.prioritization import calculate_priority
 from backend.services.sentiment_service import analyze_sentiment
@@ -66,6 +69,7 @@ UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 init_db()
 seed_demo_admin()
+seed_demo_data()
 
 
 def get_issue_dicts() -> list[dict[str, object]]:
@@ -86,6 +90,25 @@ def _cluster_input_from_issues(issues: list[dict[str, object]]) -> list[dict[str
         }
         for issue in issues
     ]
+
+
+def _build_clusters_with_issue_details(issues: list[dict[str, object]]) -> list[dict[str, object]]:
+    clusters = cluster_issues(_cluster_input_from_issues(issues))
+    issues_by_id = {
+        int(issue["id"]): issue
+        for issue in issues
+        if issue.get("id") is not None
+    }
+
+    enriched_clusters: list[dict[str, object]] = []
+    for cluster in clusters:
+        issue_details = [
+            issues_by_id[int(issue_id)]
+            for issue_id in cluster.get("issue_ids", [])
+            if int(issue_id) in issues_by_id
+        ]
+        enriched_clusters.append({**cluster, "issue_details": issue_details})
+    return enriched_clusters
 
 
 def _get_resolved_issues() -> list[dict[str, object]]:
@@ -214,21 +237,13 @@ def policy_recommendations() -> list[dict[str, object]]:
 @app.get("/governance_memory", tags=["analytics"])
 def governance_memory() -> list[dict[str, object]]:
     issues = get_issue_dicts()
-    clusters = cluster_issues(_cluster_input_from_issues(issues))
+    clusters = _build_clusters_with_issue_details(issues)
     resolved_issues = _get_resolved_issues()
-    issues_by_id = {
-        int(issue["id"]): issue
-        for issue in issues
-        if issue.get("id") is not None
-    }
 
     memory_results: list[dict[str, object]] = []
     for cluster in clusters:
         cluster_issue_texts: list[str] = []
-        for issue_id in cluster.get("issue_ids", []):
-            issue = issues_by_id.get(int(issue_id))
-            if issue is None:
-                continue
+        for issue in cluster.get("issue_details", []):
             title = str(issue.get("title", "")).strip()
             description = str(issue.get("description", "")).strip()
             combined_text = f"{title} {description}".strip()
@@ -255,6 +270,22 @@ def governance_memory() -> list[dict[str, object]]:
         )
 
     return memory_results
+
+
+@app.get("/war_room", tags=["analytics"])
+def war_room(cluster_id: int) -> dict[str, object]:
+    issues = get_issue_dicts()
+    clusters = _build_clusters_with_issue_details(issues)
+    target_cluster = next((cluster for cluster in clusters if int(cluster.get("cluster_id", -1)) == int(cluster_id)), None)
+    if target_cluster is None:
+        raise HTTPException(status_code=404, detail="Cluster not found.")
+
+    resolved_issues = _get_resolved_issues()
+    return build_war_room(
+        target_cluster,
+        target_cluster.get("issue_details", []),
+        resolved_issues,
+    )
 
 
 @app.post("/generate_update", tags=["communication"])

@@ -4,14 +4,16 @@ from functools import lru_cache
 from typing import Any
 
 import numpy as np
-from sentence_transformers import SentenceTransformer
+from sklearn.feature_extraction.text import TfidfVectorizer
 
 
 MODEL_NAME = "all-MiniLM-L6-v2"
 
 
 @lru_cache(maxsize=1)
-def _get_model() -> SentenceTransformer:
+def _get_model() -> Any:
+    from sentence_transformers import SentenceTransformer
+
     return SentenceTransformer(MODEL_NAME)
 
 
@@ -44,22 +46,34 @@ def find_similar_case(
         return None
 
     query_text = f"{cluster_title.strip()} {cluster_description.strip()}".strip()
-    query_vector = _to_vector(embed_text(query_text))
+    issue_texts = [
+        f"{str(issue.get('title', '')).strip()} {str(issue.get('description', '')).strip()}".strip()
+        for issue in resolved_issues
+    ]
+
+    try:
+        query_vector = _to_vector(embed_text(query_text))
+        candidate_vectors = []
+        for issue, issue_text in zip(resolved_issues, issue_texts):
+            stored_embedding = issue.get("embedding")
+            if stored_embedding is None:
+                candidate_vectors.append(_to_vector(embed_text(issue_text)))
+            else:
+                candidate_vectors.append(_to_vector(stored_embedding))
+    except Exception:
+        vectorizer = TfidfVectorizer(stop_words="english")
+        matrix = vectorizer.fit_transform([query_text] + issue_texts)
+        query_vector = matrix[0].toarray().reshape(-1).astype(np.float32)
+        candidate_vectors = [
+            matrix[index + 1].toarray().reshape(-1).astype(np.float32)
+            for index in range(len(resolved_issues))
+        ]
 
     best_match: dict[str, Any] | None = None
     best_score = -1.0
 
-    for issue in resolved_issues:
+    for issue, candidate_vector in zip(resolved_issues, candidate_vectors):
         issue_title = str(issue.get("title", "")).strip()
-        issue_description = str(issue.get("description", "")).strip()
-        issue_text = f"{issue_title} {issue_description}".strip()
-
-        stored_embedding = issue.get("embedding")
-        if stored_embedding is None:
-            candidate_vector = _to_vector(embed_text(issue_text))
-        else:
-            candidate_vector = _to_vector(stored_embedding)
-
         score = _cosine_similarity(query_vector, candidate_vector)
         if score > best_score:
             best_score = score

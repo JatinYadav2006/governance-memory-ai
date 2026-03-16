@@ -83,6 +83,12 @@ def apply_page_style() -> None:
     )
 
 
+def _count_options(total: int, base: list[int]) -> list[int]:
+    options = [value for value in base if value < total]
+    options.append(total if total > 0 else base[0])
+    return sorted(set(options))
+
+
 def render_header() -> None:
     st.markdown(
         """
@@ -92,8 +98,8 @@ def render_header() -> None:
             </div>
             <h1 style="margin:0.35rem 0 0.25rem 0;">Citizen Portal</h1>
             <p style="margin:0;max-width:760px;font-size:1.02rem;color:rgba(255,255,255,0.78);">
-                Report local issues, attach supporting evidence, and instantly see how the platform
-                prioritizes your complaint with governance memory insights.
+                Report local issues, attach supporting evidence, and see how the platform
+                prioritizes your complaint and connects it to similar past civic cases.
             </p>
         </div>
         """,
@@ -115,6 +121,7 @@ def api_get(path: str) -> Any:
 
 def render_auth_section() -> None:
     st.markdown("### Account Access")
+    st.caption("Use the citizen portal to submit a complaint, review nearby active reports, and track resolved history.")
     col_login, col_signup = st.columns(2)
 
     with col_login:
@@ -218,6 +225,7 @@ def render_issue_submission(user: dict[str, Any]) -> None:
 
     with left:
         st.markdown("### Submit a New Issue")
+        st.caption("The fastest demo flow is: record or type the complaint, submit it, then watch the AI triage panel update on the right.")
         render_voice_input()
         with st.form("citizen_issue_form"):
             title = st.text_input("Issue Title")
@@ -260,6 +268,7 @@ def render_issue_submission(user: dict[str, Any]) -> None:
                 st.metric("Priority", f"{float(last_issue.get('priority_score', 0.0)):.1f}")
             with top[2]:
                 st.metric("Urgency", last_issue.get("urgency", "N/A"))
+            st.caption("This snapshot shows how the complaint entered the triage pipeline before it reaches the admin command center.")
         else:
             st.info("Submit an issue to see the AI triage result here.")
 
@@ -298,6 +307,7 @@ def render_issue_tables(user: dict[str, Any]) -> None:
         return
 
     nearby = filter_issues_by_location(issues, user.get("location", ""))
+    st.caption("Track the live complaint queue, the nearby active feed, and the resolved history without scrolling through long lists.")
     metrics = st.columns(3)
     with metrics[0]:
         st.metric("Total Reports", len(issues))
@@ -310,7 +320,7 @@ def render_issue_tables(user: dict[str, Any]) -> None:
 
     with feed_tab:
         search = st.text_input("Search nearby issues", placeholder="Search title or location", key="nearby_search")
-        show_count = st.selectbox("Show nearby", [10, 20, 50, len(nearby) if nearby else 10], key="nearby_count")
+        show_count = st.selectbox("Show nearby", _count_options(len(nearby), [10, 20, 50]), key="nearby_count")
         filtered = nearby
         if search.strip():
             term = search.strip().lower()
@@ -328,7 +338,7 @@ def render_issue_tables(user: dict[str, Any]) -> None:
 
     with all_tab:
         search = st.text_input("Search active reports", placeholder="Search title or location", key="all_reports_search")
-        show_count = st.selectbox("Show reports", [10, 25, 50, len(issues) if issues else 10], key="all_reports_count")
+        show_count = st.selectbox("Show reports", _count_options(len(issues), [10, 25, 50]), key="all_reports_count")
         filtered = issues
         if search.strip():
             term = search.strip().lower()
@@ -352,7 +362,7 @@ def render_issue_tables(user: dict[str, Any]) -> None:
         )
         show_count = st.selectbox(
             "Show resolved",
-            [10, 25, 50, len(resolved_issues) if resolved_issues else 10],
+            _count_options(len(resolved_issues), [10, 25, 50]),
             key="resolved_reports_count",
         )
         filtered = resolved_issues
@@ -375,7 +385,8 @@ def main() -> None:
     init_state()
     apply_page_style()
     render_header()
-    render_auth_section()
+    if st.session_state.get("current_user") is None:
+        render_auth_section()
     user = require_login()
     if user is None:
         return

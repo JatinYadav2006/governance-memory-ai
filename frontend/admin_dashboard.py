@@ -12,6 +12,7 @@ DEMO_ADMIN_PASSWORD = "admin123"
 def init_state() -> None:
     st.session_state.setdefault("admin_user", None)
     st.session_state.setdefault("generated_update", "")
+    st.session_state.setdefault("selected_war_room_cluster", None)
 
 
 def api_get(path: str) -> dict | list:
@@ -24,6 +25,20 @@ def api_post(path: str, json: dict) -> dict:
     response = requests.post(f"{API_BASE}{path}", json=json, timeout=15)
     response.raise_for_status()
     return response.json() or {}
+
+
+def _count_options(total: int, base: list[int]) -> list[int]:
+    options = [value for value in base if value < total]
+    options.append(total if total > 0 else base[0])
+    return sorted(set(options))
+
+
+def _confidence_label(score: float) -> str:
+    if score >= 0.82:
+        return "High confidence"
+    if score >= 0.68:
+        return "Medium confidence"
+    return "Low confidence"
 
 
 def apply_page_style() -> None:
@@ -120,6 +135,39 @@ def apply_page_style() -> None:
             background: rgba(59,130,246,0.08);
             color: rgba(191,219,254,0.95);
         }
+        .gm-summary-strip {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 14px;
+            margin-bottom: 18px;
+        }
+        .gm-summary-card {
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 18px;
+            padding: 16px 18px;
+            background: rgba(255,255,255,0.03);
+        }
+        .gm-console-grid {
+            display: grid;
+            grid-template-columns: 1.1fr 0.9fr;
+            gap: 16px;
+            align-items: start;
+        }
+        .gm-ops-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            align-items: start;
+        }
+        .gm-war-room {
+            border: 1px solid rgba(56,189,248,0.22);
+            border-radius: 24px;
+            padding: 20px 22px;
+            background:
+                radial-gradient(circle at top right, rgba(56,189,248,0.12), transparent 20%),
+                linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
+            box-shadow: 0 24px 54px rgba(0,0,0,0.24);
+        }
         .gm-mini {
             font-size: 0.82rem;
             text-transform: uppercase;
@@ -207,6 +255,15 @@ def render_login() -> dict | None:
 def fetch_crisis_alerts() -> list[dict]:
     alerts_payload = api_get("/crisis_alerts")
     return alerts_payload if isinstance(alerts_payload, list) else []
+
+
+def severity_tone(severity: str) -> tuple[str, str]:
+    normalized = severity.lower()
+    if normalized in {"high", "severe"}:
+        return "#fecaca", "rgba(220,38,38,0.16)"
+    if normalized == "medium":
+        return "#fdba74", "rgba(249,115,22,0.16)"
+    return "#fde68a", "rgba(234,179,8,0.16)"
 
 
 def render_metric_strip(
@@ -315,6 +372,27 @@ def render_crisis_alerts(alerts: list[dict]) -> None:
         '<div class="gm-section-subtitle">Surface clusters that may require immediate escalation or rapid field response.</div>',
         unsafe_allow_html=True,
     )
+    high_alerts = sum(1 for alert in alerts if str(alert.get("severity", "")).lower() in {"high", "severe"})
+    monitored_zones = len({str(alert.get("location", "")).strip() for alert in alerts if str(alert.get("location", "")).strip()})
+    st.markdown(
+        f"""
+        <div class="gm-summary-strip">
+            <div class="gm-summary-card">
+                <div class="gm-mini">Active Alerts</div>
+                <div style="font-size:1.7rem;font-weight:800;margin-top:6px;">{len(alerts)}</div>
+            </div>
+            <div class="gm-summary-card">
+                <div class="gm-mini">High Severity</div>
+                <div style="font-size:1.7rem;font-weight:800;margin-top:6px;">{high_alerts}</div>
+            </div>
+            <div class="gm-summary-card">
+                <div class="gm-mini">Watched Locations</div>
+                <div style="font-size:1.7rem;font-weight:800;margin-top:6px;">{monitored_zones}</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     if not alerts:
         st.markdown(
             """
@@ -349,13 +427,28 @@ def render_crisis_alerts(alerts: list[dict]) -> None:
         )
 
 
+def render_command_center(analytics: dict, trends: dict, alerts: list[dict]) -> None:
+    st.markdown(
+        '<div class="gm-section-subtitle">Use the signal boards below to move from a fast citywide scan into focused crisis review without one long scroll.</div>',
+        unsafe_allow_html=True,
+    )
+    signals_tab, crisis_tab = st.tabs(["Signals Board", "Crisis Monitor"])
+
+    with signals_tab:
+        render_charts(analytics, trends)
+
+    with crisis_tab:
+        render_crisis_alerts(alerts)
+
+
 def render_cluster_console(
     clusters: list[dict],
     insights: list[dict],
     recommendations: list[dict],
     memory_items: list[dict],
 ) -> None:
-    st.markdown("#### Cluster Intelligence")
+    st.markdown("#### Cluster Intelligence Console")
+    st.caption("Review each cluster with issue IDs, AI interpretation, policy recommendations, and historical memory in one place.")
     if not clusters:
         st.info("No issue clusters available yet.")
         return
@@ -373,8 +466,12 @@ def render_cluster_console(
         for item in memory_items
     }
 
-    search = st.text_input("Search clusters", placeholder="Filter by title or location")
-    display_count = st.selectbox("Show", [4, 8, 12, len(clusters)], index=1)
+    controls_left, controls_right = st.columns([2, 1])
+    with controls_left:
+        search = st.text_input("Search clusters", placeholder="Filter by title or location")
+    with controls_right:
+        options = _count_options(len(clusters), [4, 8, 12])
+        display_count = st.selectbox("Show", options, index=min(1, len(options) - 1))
     normalized_search = search.strip().lower()
 
     filtered_clusters = [
@@ -391,12 +488,17 @@ def render_cluster_console(
         location = cluster.get("location", "Unknown")
         issue_count = cluster.get("issue_count", 0)
         issue_ids = cluster.get("issue_ids", [])
+        confidence_score = float(cluster.get("confidence_score", 0.0) or 0.0)
+        evidence_terms = cluster.get("evidence_terms", [])
         cluster_key = (str(cluster_title).strip().lower(), str(location).strip().lower())
         insight = insights_by_cluster.get(cluster_key, {})
         recommendation = recommendations_by_cluster.get(cluster_key, {})
         memory_item = memory_by_cluster.get(cluster_key, {})
+        top_recommendation = next(iter(recommendation.get("recommendations", [])), "Awaiting recommended action set.")
+        memory_summary = memory_item.get("similar_case", "No historical match found yet.")
 
-        with st.container(border=True):
+        with st.container():
+            st.markdown('<div class="gm-panel">', unsafe_allow_html=True)
             top_cols = st.columns([2, 1, 1])
             with top_cols[0]:
                 st.markdown(f"#### {index}. {cluster_title}")
@@ -404,10 +506,21 @@ def render_cluster_console(
             with top_cols[1]:
                 st.metric("Complaints", issue_count)
             with top_cols[2]:
-                st.metric("Issue IDs", len(issue_ids))
+                st.metric("Confidence", _confidence_label(confidence_score))
+
+            preview_left, preview_right = st.columns([1.2, 0.8])
+            with preview_left:
+                st.markdown("**Live Insight**")
+                st.write(insight.get("insight", "No AI insight available yet."))
+            with preview_right:
+                st.markdown("**Immediate Focus**")
+                st.write(top_recommendation)
+                st.caption(memory_summary)
+                if evidence_terms:
+                    st.caption(f"Evidence terms: {', '.join(str(term) for term in evidence_terms)}")
 
             with st.expander("View Details"):
-                info_cols = st.columns(3)
+                info_cols = st.columns(4)
                 with info_cols[0]:
                     st.markdown("**Issue IDs**")
                     if issue_ids:
@@ -415,9 +528,16 @@ def render_cluster_console(
                     else:
                         st.caption("No complaint IDs available.")
                 with info_cols[1]:
+                    st.markdown("**Cluster Confidence**")
+                    st.write(f"{confidence_score:.2f} | {_confidence_label(confidence_score)}")
+                    if evidence_terms:
+                        st.caption(", ".join(str(term) for term in evidence_terms))
+                    else:
+                        st.caption("No evidence terms available.")
+                with info_cols[2]:
                     st.markdown("**AI Insight**")
                     st.write(insight.get("insight", "No AI insight available yet."))
-                with info_cols[2]:
+                with info_cols[3]:
                     st.markdown("**Governance Memory**")
                     similar_case = memory_item.get("similar_case")
                     if similar_case:
@@ -434,10 +554,176 @@ def render_cluster_console(
                         st.markdown(f"- {item}")
                 else:
                     st.caption("No AI recommendations available yet.")
+            st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_war_room(clusters: list[dict]) -> None:
+    st.markdown("### AI Multi-Agent Emergency War Room")
+    st.caption("Launch a coordinated response room where specialized AI agents analyze one cluster together.")
+    if not clusters:
+        st.info("Create some issue clusters first to launch the War Room.")
+        return
+
+    sorted_clusters = sorted(clusters, key=lambda item: int(item.get("issue_count", 0)), reverse=True)
+    default_cluster_id = st.session_state.get("selected_war_room_cluster")
+    default_index = 0
+    if default_cluster_id is not None:
+        for idx, cluster in enumerate(sorted_clusters):
+            if int(cluster.get("cluster_id", -1)) == int(default_cluster_id):
+                default_index = idx
+                break
+
+    def format_cluster(cluster: dict) -> str:
+        return (
+            f"#{cluster.get('cluster_id', 'N/A')} | "
+            f"{cluster.get('cluster_title', 'Recurring Civic Issue')} | "
+            f"{cluster.get('location', 'Unknown')} | "
+            f"{cluster.get('issue_count', 0)} complaints"
+        )
+
+    picker_col, context_col = st.columns([1.4, 0.9])
+    with picker_col:
+        selected_cluster = st.selectbox(
+            "Choose cluster for War Room",
+            sorted_clusters,
+            index=default_index,
+            format_func=format_cluster,
+            key="war_room_cluster_picker",
+        )
+    with context_col:
+        st.markdown(
+            """
+            <div class="gm-card" style="margin-top:28px;">
+                <div class="gm-mini">Why This Matters</div>
+                <div style="margin-top:8px;line-height:1.55;color:rgba(255,255,255,0.82);">
+                    This room synthesizes crisis risk, policy response, historical memory, trust impact,
+                    and citizen communications into one decision-ready response flow.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    st.session_state["selected_war_room_cluster"] = int(selected_cluster.get("cluster_id", 0))
+
+    try:
+        war_room_payload = api_get(f"/war_room?cluster_id={int(selected_cluster.get('cluster_id', 0))}")
+        war_room = war_room_payload if isinstance(war_room_payload, dict) else {}
+    except requests.RequestException as exc:
+        st.warning(f"Unable to load War Room analysis: {exc}")
+        return
+
+    if not war_room:
+        st.info("No War Room analysis available for this cluster.")
+        return
+
+    badge_text, badge_background = severity_tone(str(war_room.get("status", "Active Monitoring")))
+
+    st.markdown(
+        f"""
+        <div class="gm-war-room">
+            <div style="display:flex;justify-content:space-between;gap:18px;align-items:flex-start;">
+                <div>
+                    <div class="gm-mini">Live Coordination Room</div>
+                    <h3 style="margin:0.45rem 0 0.2rem 0;">{war_room.get("cluster_title", "Recurring Civic Issue")}</h3>
+                    <div style="color:rgba(255,255,255,0.72);">{war_room.get("location", "Unknown")} | {war_room.get("issue_count", 0)} complaints</div>
+                </div>
+                <div style="padding:8px 14px;border-radius:999px;background:{badge_background};font-weight:800;color:{badge_text};">
+                    {war_room.get("status", "Active Monitoring")}
+                </div>
+            </div>
+            <div style="margin-top:16px;font-size:1.02rem;color:rgba(255,255,255,0.86);">
+                {war_room.get("final_recommendation", "No final recommendation generated.")}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    summary_items = [
+        ("Situation Read", war_room.get("insight", "No situational insight available.")),
+        ("Recommended First Move", (war_room.get("action_plan") or ["No immediate action plan available."])[0]),
+        (
+            "Historical Anchor",
+            (war_room.get("memory_match") or {}).get("similar_case_title", "No resolved analogue available yet."),
+        ),
+        (
+            "Model Confidence",
+            f"{float(war_room.get('confidence_score', 0.0) or 0.0):.2f} | {_confidence_label(float(war_room.get('confidence_score', 0.0) or 0.0))}",
+        ),
+    ]
+    summary_cols = st.columns(len(summary_items))
+    for col, (label, value) in zip(summary_cols, summary_items):
+        with col:
+            st.markdown(
+                f"""
+                <div class="gm-card">
+                    <div class="gm-mini">{label}</div>
+                    <div style="margin-top:8px;line-height:1.55;font-weight:600;">{value}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+    evidence_terms = war_room.get("evidence_terms") or []
+    if evidence_terms:
+        st.caption(f"Cluster evidence terms: {', '.join(str(term) for term in evidence_terms)}")
+
+    left, right = st.columns([1.2, 0.8])
+    with left:
+        st.markdown("#### Agent Deliberation")
+        for agent in war_room.get("agents", []):
+            st.markdown(
+                f"""
+                <div class="gm-card">
+                    <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
+                        <div style="font-weight:800;">{agent.get("agent", "AI Agent")}</div>
+                        <div style="font-size:0.8rem;text-transform:uppercase;letter-spacing:0.08em;color:#7dd3fc;">
+                            {agent.get("headline", "Assessment")}
+                        </div>
+                    </div>
+                    <div style="margin-top:10px;color:rgba(255,255,255,0.84);line-height:1.6;">
+                        {agent.get("assessment", "No assessment available.")}
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    with right:
+        st.markdown("#### Action Stack")
+        action_plan = war_room.get("action_plan", [])
+        if action_plan:
+            for idx, action in enumerate(action_plan, start=1):
+                st.markdown(
+                    f"""
+                    <div class="gm-card">
+                        <div class="gm-mini">Action {idx:02d}</div>
+                        <div style="margin-top:8px;font-weight:700;line-height:1.55;">{action}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+        else:
+            st.info("No action plan available yet.")
+
+        memory_match = war_room.get("memory_match") or {}
+        if memory_match:
+            st.markdown("#### Historical Anchor")
+            st.markdown(
+                f"""
+                <div class="gm-card">
+                    <div style="font-weight:800;">{memory_match.get("similar_case_title", "Resolved Case")}</div>
+                    <div style="margin-top:8px;color:rgba(255,255,255,0.76);">{memory_match.get("location", "Unknown")}</div>
+                    <div style="margin-top:10px;"><strong>Action Taken:</strong> {memory_match.get("action_taken", "No action recorded")}</div>
+                    <div style="margin-top:8px;"><strong>Similarity:</strong> {memory_match.get("similarity_score", 0.0)}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
 
 def render_public_update_generator(issues: list[dict]) -> None:
     st.markdown("#### Public Update Generator")
+    st.caption("Create a public-facing update from the current complaint queue without leaving the operations desk.")
     if not issues:
         st.info("Submit an issue first to generate an update.")
         return
@@ -470,6 +756,7 @@ def render_public_update_generator(issues: list[dict]) -> None:
 
 def render_work_verification_upload(issues: list[dict]) -> None:
     st.markdown("#### Work Verification Upload")
+    st.caption("Close the loop by attaching proof-of-work and pushing the complaint into resolved history.")
     if not issues:
         st.info("No issues available yet for verification.")
         return
@@ -522,6 +809,8 @@ def render_work_verification_upload(issues: list[dict]) -> None:
 
 
 def render_record_tables(issues: list[dict], resolved_issues: list[dict]) -> None:
+    st.markdown("#### Operations Records")
+    st.caption("Search active complaints, resolved history, and verification evidence without letting long lists overwhelm the page.")
     issue_col, verification_col = st.columns(2)
 
     with issue_col:
@@ -530,7 +819,11 @@ def render_record_tables(issues: list[dict], resolved_issues: list[dict]) -> Non
         with active_tab:
             st.markdown("#### Active Complaints")
             search = st.text_input("Filter active issues", placeholder="Search title or location", key="issue_table_search")
-            show_count = st.selectbox("Show active", [10, 25, 50, len(issues) if issues else 10], key="issue_table_count")
+            show_count = st.selectbox(
+                "Show active",
+                _count_options(len(issues), [10, 25, 50]),
+                key="issue_table_count",
+            )
             filtered = issues
             if search.strip():
                 term = search.strip().lower()
@@ -555,7 +848,7 @@ def render_record_tables(issues: list[dict], resolved_issues: list[dict]) -> Non
             )
             show_count = st.selectbox(
                 "Show resolved",
-                [10, 25, 50, len(resolved_issues) if resolved_issues else 10],
+                _count_options(len(resolved_issues), [10, 25, 50]),
                 key="resolved_issue_table_count",
             )
             filtered = resolved_issues
@@ -589,7 +882,7 @@ def render_record_tables(issues: list[dict], resolved_issues: list[dict]) -> Non
         )
         show_count = st.selectbox(
             "Show verifications",
-            [10, 25, 50, len(records) if records else 10],
+            _count_options(len(records), [10, 25, 50]),
             key="verification_table_count",
         )
         filtered_records = records
@@ -611,6 +904,49 @@ def render_record_tables(issues: list[dict], resolved_issues: list[dict]) -> Non
             st.dataframe(df[cols], use_container_width=True, hide_index=True, height=430)
         else:
             st.info("No matching verification records.")
+
+
+def render_operations_desk(issues: list[dict], resolved_issues: list[dict]) -> None:
+    st.markdown('<div class="gm-section-title">Operations Desk</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="gm-section-subtitle">Run public communication, submit work verification, and inspect operational records from one tighter workspace.</div>',
+        unsafe_allow_html=True,
+    )
+
+    action_tab, records_tab = st.tabs(["Response Actions", "Records Console"])
+
+    with action_tab:
+        ops_left, ops_right = st.columns([1, 1])
+        with ops_left:
+            st.markdown('<div class="gm-panel">', unsafe_allow_html=True)
+            render_public_update_generator(issues)
+            st.markdown("</div>", unsafe_allow_html=True)
+        with ops_right:
+            st.markdown('<div class="gm-panel">', unsafe_allow_html=True)
+            render_work_verification_upload(issues)
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    with records_tab:
+        render_record_tables(issues, resolved_issues)
+
+
+def render_cluster_intelligence(
+    clusters: list[dict],
+    insights: list[dict],
+    recommendations: list[dict],
+    memory_items: list[dict],
+) -> None:
+    st.markdown(
+        '<div class="gm-section-subtitle">Switch between the high-impact War Room and the wider cluster review console without stacking both views into one long page.</div>',
+        unsafe_allow_html=True,
+    )
+    war_room_tab, console_tab = st.tabs(["War Room", "Cluster Console"])
+
+    with war_room_tab:
+        render_war_room(clusters)
+
+    with console_tab:
+        render_cluster_console(clusters, insights, recommendations, memory_items)
 
 
 def main() -> None:
@@ -656,25 +992,13 @@ def main() -> None:
     st.markdown("</div>", unsafe_allow_html=True)
 
     with tab_overview:
-        render_charts(analytics, trends)
-        st.markdown("")
-        render_crisis_alerts(crisis_alerts_payload)
+        render_command_center(analytics, trends, crisis_alerts_payload)
 
     with tab_clusters:
-        render_cluster_console(clusters, insights, policy_recommendations, governance_memory)
+        render_cluster_intelligence(clusters, insights, policy_recommendations, governance_memory)
 
     with tab_operations:
-        ops_left, ops_right = st.columns([1, 1])
-        with ops_left:
-            st.markdown('<div class="gm-panel">', unsafe_allow_html=True)
-            render_public_update_generator(issues)
-            st.markdown("</div>", unsafe_allow_html=True)
-        with ops_right:
-            st.markdown('<div class="gm-panel">', unsafe_allow_html=True)
-            render_work_verification_upload(issues)
-            st.markdown("</div>", unsafe_allow_html=True)
-        st.markdown("")
-        render_record_tables(issues, resolved_issues)
+        render_operations_desk(issues, resolved_issues)
 
 
 if __name__ == "__main__":

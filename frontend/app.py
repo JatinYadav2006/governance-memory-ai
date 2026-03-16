@@ -154,8 +154,8 @@ def render_sidebar() -> str:
                     <div class="nav-brand-meta">Hackathon Demo Navigation</div>
                     <div class="nav-brand-title">Governance Memory AI</div>
                     <div style="color:rgba(255,255,255,0.70);line-height:1.55;">
-                        Switch between the public-facing product story, citizen issue intake,
-                        and the AI-driven admin command center.
+                        Move from the product story to citizen intake and then into the AI-driven
+                        command center without losing the demo narrative.
                     </div>
                 </div>
             </div>
@@ -169,6 +169,7 @@ def render_sidebar() -> str:
             label_visibility="visible",
         )
         st.caption(PAGES[page]["subtitle"])
+        st.caption("Suggested order: `Home -> Citizen Portal -> Admin Dashboard`")
         st.markdown(
             """
             <div class="nav-credentials">

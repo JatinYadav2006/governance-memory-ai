@@ -71,8 +71,8 @@ def render_hero() -> None:
             </div>
             <h1 style="margin:0.45rem 0 0.35rem 0;font-size:3rem;">Governance Memory AI</h1>
             <p style="max-width:860px;font-size:1.08rem;color:rgba(255,255,255,0.78);margin:0;">
-                A hackathon-ready command system for public issue reporting, AI clustering,
-                crisis detection, policy recommendations, and verified civic response.
+                An AI-assisted governance command system that turns citizen complaints into
+                clustered signals, crisis detection, coordinated response plans, and verified action history.
             </p>
         </div>
         """,
@@ -81,14 +81,14 @@ def render_hero() -> None:
 
 
 def render_demo_flow() -> None:
-    st.markdown("### Command Flow")
+    st.markdown("### Demo Flow")
     cols = st.columns(5)
     steps = [
-        ("Citizen Intake", "Residents submit complaints with text, voice, and image evidence."),
-        ("AI Triage", "The system prioritizes, clusters, and interprets emerging complaint patterns."),
-        ("Governance Memory", "Current clusters are matched with similar resolved cases."),
-        ("Command Center", "Admins review insights, crisis alerts, and policy recommendations."),
-        ("Verified Response", "Field action is logged with proof-of-work for accountability."),
+        ("1. Citizen Intake", "Residents submit complaints with text, voice, and image evidence."),
+        ("2. AI Triage", "The platform prioritizes, clusters, and interprets emerging complaint pressure."),
+        ("3. War Room", "Specialized AI agents build a coordinated response plan for the most urgent cluster."),
+        ("4. Action + Memory", "Admins review policy guidance, historical matches, and public communication support."),
+        ("5. Verified Closure", "Field action is logged with proof-of-work and preserved in resolved history."),
     ]
     for col, (title, text) in zip(cols, steps):
         with col:
@@ -97,12 +97,12 @@ def render_demo_flow() -> None:
 
 
 def render_value_props() -> None:
-    st.markdown("### Why This Demo Lands")
+    st.markdown("### Why This Stands Out")
     cols = st.columns(3)
     cards = [
-        ("AI Operations", "Clustering, crisis alerts, policy support, and governance memory in one workflow."),
-        ("Public Accountability", "Tracks issues from complaint intake to verified action completion."),
-        ("Hackathon Ready", "Fast demo path, role-based navigation, and visuals built for judges."),
+        ("Decision Intelligence", "Complaint clustering, crisis alerts, governance memory, and multi-agent response in one operational loop."),
+        ("Public Accountability", "Tracks issues from citizen intake to verified field action and resolved history."),
+        ("Hackathon Demo Ready", "Role-based navigation, deliberate storytelling, and a clear command-center showcase for judges."),
     ]
     for col, (title, text) in zip(cols, cards):
         with col:
@@ -118,14 +118,14 @@ def render_value_props() -> None:
 
 
 def render_portal_guide() -> None:
-    st.markdown("### Demo Entry Points")
+    st.markdown("### Recommended Demo Path")
     left, right = st.columns([1, 1])
     with left:
         st.markdown(
             """
-            - `Home` for the product story
-            - `Citizen Portal` for complaint intake
-            - `Admin Dashboard` for command-center operations
+            - Start in `Home` to frame the problem and workflow
+            - Move to `Citizen Portal` to submit or review complaints
+            - Finish in `Admin Dashboard` for command-center analysis and War Room response
             """
         )
     with right:

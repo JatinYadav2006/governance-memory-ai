@@ -5,21 +5,21 @@ from typing import Any, Iterable, Mapping
 
 
 CATEGORY_KEYWORDS = {
-    "Water": ["water"],
-    "Road": ["road"],
-    "Garbage": ["garbage"],
-    "Electricity": ["electricity"],
-    "Hospital": ["hospital"],
+    "Water": ["water", "pipeline", "supply", "drain", "drainage", "leak"],
+    "Road": ["road", "pothole", "traffic", "street", "surface"],
+    "Garbage": ["garbage", "trash", "waste", "overflow", "sanitation"],
+    "Electricity": ["electricity", "electric", "power", "outage", "grid"],
+    "Health": ["hospital", "clinic", "ambulance", "medical"],
 }
 
 
-def _detect_category(description: str) -> str:
+def _detect_category(text: str) -> str:
     """
     Detect a coarse category for an issue based on description keywords.
     Returns one of the keys in CATEGORY_KEYWORDS or "Other" if none match.
     """
 
-    text = description.lower()
+    text = text.lower()
     for category, keywords in CATEGORY_KEYWORDS.items():
         if any(keyword in text for keyword in keywords):
             return category
@@ -48,7 +48,9 @@ def generate_issue_statistics(issues: Iterable[Mapping[str, Any]]) -> dict[str, 
         urgency_counter[urgency_label] += 1
 
         description = str(issue.get("description", "")).strip()
-        category = _detect_category(description) if description else "Other"
+        title = str(issue.get("title", "")).strip()
+        combined_text = f"{title} {description}".strip()
+        category = _detect_category(combined_text) if combined_text else "Other"
         category_counter[category] += 1
 
     return {
