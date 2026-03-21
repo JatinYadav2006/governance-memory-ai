@@ -19,6 +19,7 @@ def _to_issue_payload(record: IssueRecord, priority_score: float | None = None) 
         "urgency": record.urgency,
         "image_filename": record.image_filename,
         "status": record.status,
+        "cluster_id": record.cluster_id,
         "priority_score": float(resolved_priority),
     }
 
@@ -107,13 +108,19 @@ def list_issues(status: str | None = "Open") -> list[dict[str, Any]]:
         session.close()
 
 
-def mark_issue_resolved(issue_id: int) -> None:
+def mark_issues_resolved(issue_ids: list[int]) -> None:
+    if not issue_ids:
+        return
+
     session = SessionLocal()
     try:
-        issue = session.query(IssueRecord).filter(IssueRecord.id == int(issue_id)).first()
-        if issue is None:
-            return
-        issue.status = "Resolved"
+        issues = session.query(IssueRecord).filter(IssueRecord.id.in_([int(issue_id) for issue_id in issue_ids])).all()
+        for issue in issues:
+            issue.status = "Resolved"
         session.commit()
     finally:
         session.close()
+
+
+def mark_issue_resolved(issue_id: int) -> None:
+    mark_issues_resolved([int(issue_id)])

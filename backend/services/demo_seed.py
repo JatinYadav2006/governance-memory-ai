@@ -207,7 +207,7 @@ def seed_demo_data() -> None:
         priority_score = calculate_priority(payload)
         created = create_issue(payload, priority_score)
         verify_work(
-            issue_id=int(created["id"]),
+            issue_ids=[int(created["id"])],
             image_filename="seed-verification.png",
             location=str(item["verification"]["location"]),
             action_taken=str(item["verification"]["action_taken"]),

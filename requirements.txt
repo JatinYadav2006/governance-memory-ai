@@ -11,3 +11,5 @@ email-validator
 sqlalchemy
 sentence-transformers
 scipy
+SpeechRecognition
+textblob

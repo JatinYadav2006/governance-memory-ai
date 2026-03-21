@@ -33,6 +33,8 @@ class UserRecord(Base):
     location: Mapped[str] = mapped_column(String(255), nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(32), nullable=False, default="user")
+    auth_provider: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    provider_subject: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
     issues: Mapped[list["IssueRecord"]] = relationship(back_populates="user")
@@ -122,3 +124,14 @@ def _ensure_issue_columns() -> None:
             verification_columns = {str(row[1]) for row in verification_info}
             if "action_taken" not in verification_columns:
                 connection.execute(text("ALTER TABLE verification_records ADD COLUMN action_taken VARCHAR(255)"))
+
+        user_table_exists = connection.execute(
+            text("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+        ).fetchall()
+        if user_table_exists:
+            user_info = connection.execute(text("PRAGMA table_info(users)")).fetchall()
+            user_columns = {str(row[1]) for row in user_info}
+            if "auth_provider" not in user_columns:
+                connection.execute(text("ALTER TABLE users ADD COLUMN auth_provider VARCHAR(64)"))
+            if "provider_subject" not in user_columns:
+                connection.execute(text("ALTER TABLE users ADD COLUMN provider_subject VARCHAR(255)"))

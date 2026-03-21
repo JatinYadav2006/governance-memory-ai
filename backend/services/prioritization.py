@@ -1,66 +1,143 @@
 from __future__ import annotations
 
-from collections import defaultdict
-from typing import Dict, Mapping
+import re
+from typing import Mapping
+
+from backend.db.database import IssueRecord, SessionLocal
 
 
-# Simple, in-memory tracker for recurrence by location.
-# Each call to `calculate_priority` is treated as a new issue event.
-_location_counts: Dict[str, int] = defaultdict(int)
-
-_URGENCY_SCORES: Dict[str, int] = {
-    "low": 1,
-    "medium": 2,
-    "high": 3,
+_URGENCY_SCORES = {
+    "low": 1.0,
+    "medium": 2.0,
+    "high": 3.0,
 }
 
-_SEVERITY_KEYWORDS = {
-    "water",
-    "electricity",
-    "road",
-    "hospital",
+_CATEGORY_PATTERNS = {
+    "water": ["water", "pipeline", "pipe", "leak", "tap", "supply", "drain", "drainage"],
+    "power": ["power", "electric", "electricity", "outage", "grid", "streetlight"],
+    "road": ["road", "pothole", "traffic", "surface", "street"],
+    "garbage": ["garbage", "trash", "waste", "sanitation", "overflow", "bin"],
+    "health": ["hospital", "ambulance", "medical", "clinic"],
+}
+
+_CATEGORY_BASE_IMPACT = {
+    "water": 2.4,
+    "power": 2.2,
+    "road": 1.8,
+    "garbage": 1.6,
+    "health": 2.5,
+    "general": 1.2,
+}
+
+_HIGH_RISK_TERMS = {
     "flood",
+    "burst",
+    "danger",
+    "accident",
+    "injury",
+    "blocked",
+    "outage",
+    "collapsed",
+    "sewage",
+    "emergency",
+    "unsafe",
 }
+
+_MEDIUM_RISK_TERMS = {
+    "overflow",
+    "broken",
+    "delay",
+    "leak",
+    "dirty",
+    "waterlogged",
+    "smell",
+    "damage",
+}
+
+_MAX_RECURRENCE_SCORE = 2.0
+_MAX_RISK_SCORE = 2.0
+_MAX_DESCRIPTION_LENGTH = 600
+
+
+def _normalize_text(text: str) -> str:
+    lowered = text.lower()
+    lowered = re.sub(r"\s+", " ", lowered).strip()
+    return lowered[:_MAX_DESCRIPTION_LENGTH]
+
+
+def _tokenize(text: str) -> set[str]:
+    return set(re.findall(r"[a-zA-Z]+", text.lower()))
+
+
+def _detect_category(text: str) -> str:
+    lowered = text.lower()
+    for category, patterns in _CATEGORY_PATTERNS.items():
+        if any(pattern in lowered for pattern in patterns):
+            return category
+    return "general"
+
+
+def _risk_signal_score(text: str) -> float:
+    tokens = _tokenize(text)
+    high_matches = len(tokens & _HIGH_RISK_TERMS)
+    medium_matches = len(tokens & _MEDIUM_RISK_TERMS)
+    score = (high_matches * 0.8) + (medium_matches * 0.35)
+    return min(score, _MAX_RISK_SCORE)
+
+
+def _recurrence_score(location: str, category: str) -> float:
+    if not location:
+        return 0.4
+
+    session = SessionLocal()
+    try:
+        open_issues = (
+            session.query(IssueRecord)
+            .filter(IssueRecord.status == "Open")
+            .filter(IssueRecord.location.ilike(location.strip()))
+            .all()
+        )
+    finally:
+        session.close()
+
+    similar_open_count = 0
+    for issue in open_issues:
+        issue_category = _detect_category(f"{issue.title} {issue.description}")
+        if issue_category == category:
+            similar_open_count += 1
+
+    return min(0.4 + (similar_open_count * 0.4), _MAX_RECURRENCE_SCORE)
 
 
 def calculate_priority(issue: Mapping[str, str]) -> float:
     """
-    Compute a simple priority score for a citizen issue.
+    Compute a more defensible priority score for a citizen issue.
 
-    The score combines:
-    - urgency (1–3)
-    - recurrence (number of issues seen for the same location)
-    - severity (count of severity-related keywords in the description)
-
-    priority_score = 0.5 * urgency_score
-                      + 0.3 * recurrence_score
-                      + 0.2 * severity_score
+    Design goals:
+    - repeated words should not inflate the score
+    - recurrence should come from actual stored open complaints, not an in-memory counter
+    - essential services and visible risk signals should matter
+    - the final score should stay in a readable range for the UI
     """
 
-    title = (issue.get("title") or "").strip()
-    description = (issue.get("description") or "").strip()
-    location = (issue.get("location") or "").strip()
-    urgency_raw = (issue.get("urgency") or "").strip().lower()
+    title = _normalize_text(str(issue.get("title") or ""))
+    description = _normalize_text(str(issue.get("description") or ""))
+    location = str(issue.get("location") or "").strip()
+    urgency_raw = str(issue.get("urgency") or "").strip().lower()
 
-    # Urgency mapping: Low=1, Medium=2, High=3 (default to 1 if unknown).
-    urgency_score = _URGENCY_SCORES.get(urgency_raw, 1)
+    combined_text = f"{title} {description}".strip()
+    category = _detect_category(combined_text)
 
-    # Recurrence score: increment for each issue seen at the same location.
-    if location:
-        _location_counts[location] += 1
-        recurrence_score = _location_counts[location]
-    else:
-        recurrence_score = 1
-
-    # Severity score: count of distinct severity keywords in the description.
-    text_blob = f"{title} {description}".lower()
-    severity_score = sum(1 for kw in _SEVERITY_KEYWORDS if kw in text_blob)
+    urgency_score = _URGENCY_SCORES.get(urgency_raw, 1.0)
+    category_score = _CATEGORY_BASE_IMPACT.get(category, _CATEGORY_BASE_IMPACT["general"])
+    recurrence_score = _recurrence_score(location, category)
+    risk_score = _risk_signal_score(combined_text)
 
     priority_score = (
-        0.5 * urgency_score
-        + 0.3 * recurrence_score
-        + 0.2 * severity_score
+        (urgency_score * 0.9)
+        + (category_score * 0.45)
+        + (recurrence_score * 0.55)
+        + (risk_score * 0.5)
     )
 
-    return float(priority_score)
-
+    return round(float(priority_score), 2)

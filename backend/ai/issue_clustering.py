@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import re
 from collections import Counter, defaultdict
-from functools import lru_cache
 from typing import Any
 
 import numpy as np
 from sklearn.cluster import DBSCAN
 from sklearn.feature_extraction.text import TfidfVectorizer
 
+from backend.services.embedding_service import generate_embedding as shared_generate_embedding
 
-MODEL_NAME = "all-MiniLM-L6-v2"
+
 STOPWORDS = {
     "a",
     "an",
@@ -60,13 +60,6 @@ TITLE_PATTERNS = [
     ({"power"}, "Power Supply Issue"),
     ({"electric"}, "Power Supply Issue"),
 ]
-
-
-@lru_cache(maxsize=1)
-def _get_model() -> Any:
-    from sentence_transformers import SentenceTransformer
-
-    return SentenceTransformer(MODEL_NAME)
 
 
 def _to_vector(embedding: Any) -> np.ndarray:
@@ -173,8 +166,7 @@ def _fallback_cluster_by_keywords(issue_list: list[dict[str, Any]], texts: list[
 
 
 def generate_embedding(text: str) -> list[float]:
-    model = _get_model()
-    embedding = model.encode(text or "", normalize_embeddings=False)
+    embedding = shared_generate_embedding(text or "")
     if isinstance(embedding, np.ndarray):
         return embedding.tolist()
     return list(embedding)

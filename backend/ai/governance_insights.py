@@ -44,6 +44,7 @@ def generate_cluster_insight(cluster: dict[str, Any]) -> dict[str, str]:
     location = str(cluster.get("location", "Unknown area")).strip() or "Unknown area"
     issue_count = _to_int(cluster.get("issue_count"))
     previous_issue_count = _to_int(cluster.get("previous_issue_count"))
+    evidence_terms = [str(term) for term in cluster.get("evidence_terms", []) if str(term).strip()]
 
     widespread = issue_count >= HIGH_VOLUME_THRESHOLD
     rising_trend = previous_issue_count > 0 and issue_count > previous_issue_count
@@ -56,11 +57,20 @@ def generate_cluster_insight(cluster: dict[str, Any]) -> dict[str, str]:
     elif rising_trend:
         opening = f"{cluster_title} complaints are increasing in {location}."
 
-    insight = f"{opening} {_problem_summary(cluster_title)}"
+    evidence_line = (
+        f" The cluster is being grouped around terms like {', '.join(evidence_terms[:3])}."
+        if evidence_terms
+        else ""
+    )
+    operating_note = (
+        " This is a local decision-support inference based on complaint concentration and complaint language."
+    )
+    insight = f"{opening} {_problem_summary(cluster_title)}{evidence_line}{operating_note}"
 
     return {
         "cluster_title": cluster_title,
         "location": location,
         "insight": insight,
         "recommendation": _recommendation(cluster_title),
+        "evidence_note": evidence_line.strip() if evidence_line else "Grouped from repeated complaint language and location overlap.",
     }

@@ -8,6 +8,7 @@ def generate_policy_recommendation(cluster: dict[str, Any]) -> dict[str, object]
     location = str(cluster.get("location", "Unknown")).strip() or "Unknown"
     title_lower = cluster_title.lower()
     issue_count = int(cluster.get("issue_count", 0) or 0)
+    confidence_score = float(cluster.get("confidence_score", 0.0) or 0.0)
 
     if "garbage" in title_lower or "waste" in title_lower or "trash" in title_lower:
         recommendations = [
@@ -47,4 +48,8 @@ def generate_policy_recommendation(cluster: dict[str, Any]) -> dict[str, object]
         "cluster_title": cluster_title,
         "location": location,
         "recommendations": recommendations,
+        "rationale": (
+            f"Recommendations are based on the detected service category, {issue_count} linked complaints, "
+            f"and a cluster confidence of {confidence_score:.2f}."
+        ),
     }

@@ -29,6 +29,17 @@ def _operations_actions(recommendations: list[str], issue_count: int) -> list[st
     return actions
 
 
+def _evidence_brief(cluster: dict[str, Any], issue_details: list[dict[str, Any]]) -> str:
+    evidence_terms = [str(term) for term in cluster.get("evidence_terms", []) if str(term).strip()]
+    complaint_count = len(issue_details)
+    if evidence_terms:
+        return (
+            f"This room is working from {complaint_count} linked complaints grouped around "
+            f"{', '.join(evidence_terms[:3])}."
+        )
+    return f"This room is working from {complaint_count} linked complaints grouped by semantic similarity and locality."
+
+
 def _trust_projection(issue_count: int) -> str:
     if issue_count >= 15:
         return "Public trust is at real risk of visible decline if this cluster remains unresolved beyond the next 24 hours."
@@ -100,13 +111,18 @@ def build_war_room(
             "agent": "Policy Advisor",
             "headline": "Recommended Measures",
             "assessment": (
-                "Priority interventions: " + " ".join(policy["recommendations"][:3])
+                "Priority interventions: " + " ".join(policy["recommendations"][:3]) + f" Rationale: {policy.get('rationale', '')}"
             ),
         },
         {
             "agent": "Trust Impact Analyst",
             "headline": "Public Confidence",
             "assessment": _trust_projection(issue_count),
+        },
+        {
+            "agent": "Evidence Officer",
+            "headline": "Evidence Base",
+            "assessment": _evidence_brief(cluster, issue_details),
         },
         {
             "agent": "Public Communication Officer",
@@ -147,6 +163,7 @@ def build_war_room(
         "insight": insight["insight"],
         "confidence_score": float(cluster.get("confidence_score", 0.0) or 0.0),
         "evidence_terms": list(cluster.get("evidence_terms", [])),
+        "evidence_summary": _evidence_brief(cluster, issue_details),
         "agents": agents,
         "final_recommendation": final_recommendation,
         "action_plan": action_plan,

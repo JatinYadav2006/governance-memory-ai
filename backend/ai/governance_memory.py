@@ -1,20 +1,11 @@
 from __future__ import annotations
 
-from functools import lru_cache
 from typing import Any
 
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 
-
-MODEL_NAME = "all-MiniLM-L6-v2"
-
-
-@lru_cache(maxsize=1)
-def _get_model() -> Any:
-    from sentence_transformers import SentenceTransformer
-
-    return SentenceTransformer(MODEL_NAME)
+from backend.services.embedding_service import generate_embedding as shared_generate_embedding
 
 
 def _to_vector(value: Any) -> np.ndarray:
@@ -30,8 +21,7 @@ def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
 
 
 def embed_text(text: str) -> list[float]:
-    model = _get_model()
-    embedding = model.encode(text or "", normalize_embeddings=False)
+    embedding = shared_generate_embedding(text or "")
     if isinstance(embedding, np.ndarray):
         return embedding.tolist()
     return list(embedding)

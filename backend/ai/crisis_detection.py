@@ -58,6 +58,7 @@ def detect_crisis(clusters: list[dict[str, Any]]) -> list[dict[str, str]]:
                 "location": location,
                 "severity": severity,
                 "message": _message_for_cluster(cluster_title, severity),
+                "reason": f"{issue_count} linked complaints crossed the configured alert threshold.",
             }
         )
 

@@ -1,22 +1,23 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Union
+from typing import Any, Union
 
 import numpy as np
-from sentence_transformers import SentenceTransformer
 
 
 MODEL_NAME = "all-MiniLM-L6-v2"
 
 
 @lru_cache(maxsize=1)
-def _get_model() -> SentenceTransformer:
+def _get_model() -> Any:
     """
     Load the Sentence Transformers model once and cache it.
 
     This prevents reloading the model for every embedding request.
     """
+
+    from sentence_transformers import SentenceTransformer
 
     return SentenceTransformer(MODEL_NAME)
 

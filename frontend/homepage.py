@@ -138,6 +138,27 @@ def render_portal_guide() -> None:
         )
 
 
+def render_business_case() -> None:
+    st.markdown("### Investor Angle")
+    cols = st.columns(3)
+    items = [
+        ("Municipal SaaS", "Positioned as a city operations platform for municipal corporations, smart-city control rooms, and ward command centers."),
+        ("Operational ROI", "Clustering, assignment routing, and SLA tracking reduce manual complaint review overhead and improve service accountability."),
+        ("Data Moat", "Resolved history, governance memory, and verified proof-of-work create long-term civic operations intelligence."),
+    ]
+    for col, (title, text) in zip(cols, items):
+        with col:
+            st.markdown(
+                f"""
+                <div class="feature">
+                    <div style="font-size:1.1rem;font-weight:800;margin-bottom:10px;">{title}</div>
+                    <div style="color:rgba(255,255,255,0.76);line-height:1.6;">{text}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+
 def main() -> None:
     configure_page()
     render_hero()
@@ -147,6 +168,8 @@ def main() -> None:
     render_value_props()
     st.divider()
     render_portal_guide()
+    st.divider()
+    render_business_case()
 
 
 if __name__ == "__main__":
