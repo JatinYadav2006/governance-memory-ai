@@ -2,6 +2,7 @@ import tempfile
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import pandas as pd
 import requests
@@ -790,6 +791,49 @@ def render_issue_tables(user: dict[str, Any]) -> None:
             st.info("No resolved reports yet.")
 
 
+def render_policy_lookup_tab() -> None:
+    st.markdown("### Local Policy Lookup")
+    st.caption(
+        "Find relevant policy documents in `assets/policies` by keyword. Matches filenames and, if `pypdf` is installed, PDF content." 
+    )
+    keyword = st.text_input("Policy keyword", placeholder="e.g. flood, electricity, sewage", key="policy_search_keyword")
+
+    if not keyword.strip():
+        st.info("Type a keyword to search in policy documents.")
+        return
+
+    try:
+        policy_results = api_get("/policy_search", {"query": keyword.strip()})
+    except requests.RequestException as exc:
+        st.error(f"Failed to search policies: {exc}")
+        return
+
+    if not policy_results:
+        st.warning("No matching policies found. Add PDFs under assets/policies and restart backend.")
+        return
+
+    st.success(f"Found {len(policy_results)} policy document(s).")
+
+    for policy in policy_results:
+        filename = policy.get("filename")
+        source = policy.get("match_source", "filename")
+        snippet = policy.get("snippet")
+        policy_url = f"{API_BASE}/policies/{quote(filename)}"
+
+        st.markdown(f"#### {filename}")
+        st.markdown(f"- Matched via: **{source}**")
+        st.markdown(f"- [Open policy PDF]({policy_url})")
+
+        if snippet:
+            st.markdown(f"**Snippet:** {snippet}")
+
+        st.markdown(
+            f"<iframe src=\"{policy_url}#toolbar=0\" width=\"100%\" height=\"470\"></iframe>",
+            unsafe_allow_html=True,
+        )
+        st.divider()
+
+
 def render_transparency_panel(user: dict[str, Any]) -> None:
     st.markdown("### Local Transparency")
     st.caption("See how complaints in your area are progressing, which department is responsible, and whether proof-of-work has been recorded.")
@@ -886,7 +930,9 @@ def main() -> None:
         return
 
     st.markdown('<div class="gm-tabs">', unsafe_allow_html=True)
-    tab_submit, tab_feed, tab_transparency = st.tabs(["Report Issue", "Track Reports", "Local Transparency"])
+    tab_submit, tab_feed, tab_transparency, tab_policy = st.tabs(
+        ["Report Issue", "Track Reports", "Local Transparency", "Policy Lookup"]
+    )
     st.markdown("</div>", unsafe_allow_html=True)
 
     with tab_submit:
@@ -895,6 +941,8 @@ def main() -> None:
         render_issue_tables(user)
     with tab_transparency:
         render_transparency_panel(user)
+    with tab_policy:
+        render_policy_lookup_tab()
 
 
 if __name__ == "__main__":

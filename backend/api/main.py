@@ -7,7 +7,9 @@ from uuid import uuid4
 from fastapi import FastAPI
 from fastapi import File, Form, UploadFile
 from fastapi import HTTPException
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+import shutil
 
 from backend.ai.crisis_detection import detect_crisis
 from backend.ai.governance_memory import find_similar_case
@@ -78,6 +80,10 @@ app.include_router(auth_router)
 UPLOADS_DIR = Path("uploads")
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
+POLICY_DIR = Path(__file__).resolve().parents[2] / "assets" / "policies"
+POLICY_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/policies", StaticFiles(directory=str(POLICY_DIR)), name="policies")
+
 init_db()
 seed_demo_admin()
 seed_demo_data()
@@ -95,6 +101,42 @@ def get_issue_dicts() -> list[dict[str, object]]:
 
 def get_resolved_issue_dicts() -> list[dict[str, object]]:
     return list_issues(status="Resolved")
+
+
+def _scan_policy_files(query: str) -> list[dict[str, str]]:
+    normalized = str(query or "").strip().lower()
+    if not normalized:
+        return []
+
+    matches = []
+    for pdf_file in POLICY_DIR.glob("*.pdf"):
+        filename = pdf_file.name
+        if normalized in filename.lower():
+            matches.append({"filename": filename, "match_source": "filename", "snippet": ""})
+            continue
+
+        try:
+            from pypdf import PdfReader
+        except ImportError:
+            continue
+
+        try:
+            text_chunks = []
+            reader = PdfReader(str(pdf_file))
+            for page in reader.pages:
+                page_text = page.extract_text() or ""
+                text_chunks.append(page_text)
+            full_text = "\n".join(text_chunks)
+            if normalized in full_text.lower():
+                pos = full_text.lower().find(normalized)
+                start = max(0, pos - 120)
+                end = min(len(full_text), pos + 120)
+                snippet = full_text[start:end].replace("\n", " ")
+                matches.append({"filename": filename, "match_source": "content", "snippet": snippet})
+        except Exception:
+            continue
+
+    return matches
 
 
 def _cluster_input_from_issues(issues: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -226,6 +268,23 @@ def root() -> dict[str, str]:
 @app.get("/health", tags=["meta"])
 def health() -> dict[str, str]:
     return {"status": "healthy"}
+
+
+@app.get("/policy_search", tags=["policy"])
+def policy_search(query: str) -> list[dict[str, object]]:
+    """Search stored policy PDF documents by keyword (filename + optional PDF content via pypdf)."""
+    return _scan_policy_files(query)
+
+
+@app.post("/upload_policy", tags=["policy"])
+async def upload_policy(file: UploadFile = File(...)) -> dict[str, str]:
+    """Upload a PDF policy document to the assets/policies folder."""
+    if not file.filename.lower().endswith('.pdf'):
+        raise HTTPException(status_code=400, detail="Only PDF files are allowed.")
+    file_path = POLICY_DIR / file.filename
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    return {"message": f"Policy '{file.filename}' uploaded successfully."}
 
 
 @app.post("/submit_issue", response_model=Issue, tags=["issues"])

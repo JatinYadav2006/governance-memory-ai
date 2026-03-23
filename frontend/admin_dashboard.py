@@ -1519,6 +1519,28 @@ def render_cluster_intelligence(
         render_cluster_console(clusters, insights, recommendations, memory_items)
 
 
+def render_policy_management() -> None:
+    st.markdown("### Policy Document Management")
+    st.caption("Upload new policy PDFs for citizen access. Citizens can search and view these documents in the Policy Lookup tab.")
+
+    uploaded_file = st.file_uploader("Select a PDF policy document", type=["pdf"], key="policy_upload")
+    if uploaded_file is not None:
+        st.write(f"Selected: {uploaded_file.name}")
+        if st.button("Upload Policy", key="upload_policy_button"):
+            try:
+                files = {"file": (uploaded_file.name, uploaded_file.getvalue(), "application/pdf")}
+                response = requests.post(f"{API_BASE}/upload_policy", files=files, timeout=30)
+                response.raise_for_status()
+                result = response.json()
+                st.success(result.get("message", "Upload successful."))
+            except requests.RequestException as exc:
+                st.error(f"Upload failed: {exc}")
+
+    st.markdown("---")
+    st.markdown("#### Existing Policies")
+    st.info("Policies are stored in assets/policies. Citizens can search by keyword in the Policy Lookup tab.")
+
+
 def main() -> None:
     init_state()
     apply_page_style()
@@ -1593,7 +1615,7 @@ def main() -> None:
     render_metric_strip(issues, analytics, trust, clusters, crisis_alerts_payload)
     workspace = render_workspace_switch(
         "Admin workspace",
-        ["Performance", "Command Center", "Social Pulse", "Cluster Intelligence", "Operations Desk"],
+        ["Performance", "Command Center", "Social Pulse", "Cluster Intelligence", "Operations Desk", "Policy Management"],
         "admin_workspace",
     )
 
@@ -1612,6 +1634,8 @@ def main() -> None:
         render_social_pulse(social_pulse)
     elif workspace == "Cluster Intelligence":
         render_cluster_intelligence(clusters, insights, policy_recommendations, governance_memory)
+    elif workspace == "Policy Management":
+        render_policy_management()
     else:
         render_operations_desk(issues, resolved_issues, clusters)
     st.markdown("</div>", unsafe_allow_html=True)

@@ -13,3 +13,4 @@ sentence-transformers
 scipy
 SpeechRecognition
 textblob
+pypdf
