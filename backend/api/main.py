@@ -103,7 +103,8 @@ def get_resolved_issue_dicts() -> list[dict[str, object]]:
     return list_issues(status="Resolved")
 
 
-def _scan_policy_files(query: str) -> list[dict[str, str]]:
+def _scan_policy_files(query: str, date_from: str | None = None, date_to: str | None = None) -> list[dict[str, str]]:
+    from datetime import datetime
     normalized = str(query or "").strip().lower()
     if not normalized:
         return []
@@ -111,8 +112,17 @@ def _scan_policy_files(query: str) -> list[dict[str, str]]:
     matches = []
     for pdf_file in POLICY_DIR.glob("*.pdf"):
         filename = pdf_file.name
+        stat = pdf_file.stat()
+        upload_date = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d")
+
+        # Filter by date if provided
+        if date_from and upload_date < date_from:
+            continue
+        if date_to and upload_date > date_to:
+            continue
+
         if normalized in filename.lower():
-            matches.append({"filename": filename, "match_source": "filename", "snippet": ""})
+            matches.append({"filename": filename, "match_source": "filename", "snippet": "", "upload_date": upload_date})
             continue
 
         try:
@@ -132,11 +142,15 @@ def _scan_policy_files(query: str) -> list[dict[str, str]]:
                 start = max(0, pos - 120)
                 end = min(len(full_text), pos + 120)
                 snippet = full_text[start:end].replace("\n", " ")
-                matches.append({"filename": filename, "match_source": "content", "snippet": snippet})
+                matches.append({"filename": filename, "match_source": "content", "snippet": snippet, "upload_date": upload_date})
         except Exception:
             continue
 
-    return matches
+    # Sort by relevance: filename matches first, then content matches
+    matches.sort(key=lambda x: (0 if x["match_source"] == "filename" else 1, x["filename"]))
+
+    # Limit to top 10
+    return matches[:10]
 
 
 def _cluster_input_from_issues(issues: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -271,9 +285,9 @@ def health() -> dict[str, str]:
 
 
 @app.get("/policy_search", tags=["policy"])
-def policy_search(query: str) -> list[dict[str, object]]:
-    """Search stored policy PDF documents by keyword (filename + optional PDF content via pypdf)."""
-    return _scan_policy_files(query)
+def policy_search(query: str, date_from: str | None = None, date_to: str | None = None) -> list[dict[str, object]]:
+    """Search stored policy PDF documents by keyword (filename + optional PDF content via pypdf). Returns top 10 results sorted by relevance. Optional date filters in YYYY-MM-DD format."""
+    return _scan_policy_files(query, date_from, date_to)
 
 
 @app.post("/upload_policy", tags=["policy"])

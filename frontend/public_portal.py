@@ -794,16 +794,28 @@ def render_issue_tables(user: dict[str, Any]) -> None:
 def render_policy_lookup_tab() -> None:
     st.markdown("### Local Policy Lookup")
     st.caption(
-        "Find relevant policy documents in `assets/policies` by keyword. Matches filenames and, if `pypdf` is installed, PDF content." 
+        "Find relevant policy documents in `assets/policies` by keyword. Matches filenames and, if `pypdf` is installed, PDF content. Results limited to top 10 most relevant."
     )
     keyword = st.text_input("Policy keyword", placeholder="e.g. flood, electricity, sewage", key="policy_search_keyword")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        date_from = st.date_input("From date (optional)", key="policy_date_from", value=None)
+    with col2:
+        date_to = st.date_input("To date (optional)", key="policy_date_to", value=None)
 
     if not keyword.strip():
         st.info("Type a keyword to search in policy documents.")
         return
 
+    params = {"query": keyword.strip()}
+    if date_from:
+        params["date_from"] = date_from.strftime("%Y-%m-%d")
+    if date_to:
+        params["date_to"] = date_to.strftime("%Y-%m-%d")
+
     try:
-        policy_results = api_get("/policy_search", {"query": keyword.strip()})
+        policy_results = api_get("/policy_search", params)
     except requests.RequestException as exc:
         st.error(f"Failed to search policies: {exc}")
         return
@@ -818,10 +830,11 @@ def render_policy_lookup_tab() -> None:
         filename = policy.get("filename")
         source = policy.get("match_source", "filename")
         snippet = policy.get("snippet")
+        upload_date = policy.get("upload_date", "Unknown")
         policy_url = f"{API_BASE}/policies/{quote(filename)}"
 
         st.markdown(f"#### {filename}")
-        st.markdown(f"- Matched via: **{source}**")
+        st.markdown(f"- Matched via: **{source}** | Upload date: **{upload_date}**")
         st.markdown(f"- [Open policy PDF]({policy_url})")
 
         if snippet:
