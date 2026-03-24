@@ -6,6 +6,7 @@ from typing import Any
 
 from backend.ai.issue_clustering import cluster_issues
 from backend.db.database import IssueRecord, SessionLocal, VerificationRecord
+from backend.services.dispatch_service import build_cluster_key, list_dispatch_assignments
 from backend.services.trust_engine import calculate_trust_score
 
 
@@ -215,6 +216,10 @@ def _build_department_assignments_from_records(
     ]
     clusters = active_clusters if active_clusters is not None else cluster_issues(cluster_input)
     issues_by_id = {int(issue["id"]): issue for issue in active_issues}
+    manual_assignments = {
+        str(item.get("cluster_key", "")): item
+        for item in list_dispatch_assignments()
+    }
     assignments: list[dict[str, Any]] = []
 
     for cluster in clusters:
@@ -231,18 +236,28 @@ def _build_department_assignments_from_records(
             str(dominant_issue.get("urgency", "Medium")),
             str(cluster.get("location", "Unknown")),
         )
+        cluster_key = build_cluster_key(
+            str(cluster.get("cluster_title", "")),
+            str(cluster.get("location", "")),
+        )
+        manual_assignment = manual_assignments.get(cluster_key, {})
         assignments.append(
             {
                 "cluster_id": cluster.get("cluster_id"),
+                "cluster_key": cluster_key,
                 "cluster_title": cluster.get("cluster_title"),
                 "location": cluster.get("location"),
                 "issue_count": cluster.get("issue_count"),
-                "department": assignment["department"],
-                "team": assignment["team"],
-                "officer": assignment["officer"],
+                "department": manual_assignment.get("department", assignment["department"]),
+                "team": manual_assignment.get("team", assignment["team"]),
+                "officer": manual_assignment.get("officer", assignment["officer"]),
                 "sla_hours": assignment["sla_hours"],
                 "assignment_reason": assignment["reason"],
                 "confidence_score": cluster.get("confidence_score", 0.0),
+                "dispatch_status": manual_assignment.get("status", "AI Suggested"),
+                "dispatch_notes": manual_assignment.get("notes"),
+                "assigned_by": manual_assignment.get("assigned_by"),
+                "dispatch_updated_at": manual_assignment.get("updated_at"),
             }
         )
 

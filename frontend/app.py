@@ -99,6 +99,13 @@ def apply_shell_style() -> None:
             line-height: 1.6;
             margin-top: 8px;
         }
+        div[data-testid="stVerticalBlockBorderWrapper"] {
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 22px;
+            background: linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.02));
+            box-shadow: 0 18px 42px rgba(0,0,0,0.18);
+            padding: 18px 18px 14px 18px;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -152,103 +159,99 @@ def render_access_shell() -> None:
     if mode == "Login":
         login_col, info_col = st.columns([1.25, 0.95], gap="large")
         with login_col:
-            st.markdown('<div class="access-card">', unsafe_allow_html=True)
-            st.markdown('<div class="access-mini">Login</div>', unsafe_allow_html=True)
-            email = st.text_input("Email", value="", key="unified_login_email", placeholder="Enter citizen or admin email")
-            password = st.text_input("Password", type="password", key="unified_login_password")
-            if st.button("Continue", type="primary", use_container_width=True, key="unified_login_submit"):
-                try:
-                    user = api_post("/auth/admin_login", {"email": email, "password": password})
-                except requests.HTTPError:
+            with st.container(border=True):
+                st.markdown('<div class="access-mini">Login</div>', unsafe_allow_html=True)
+                email = st.text_input("Email", value="", key="unified_login_email", placeholder="Enter citizen or admin email")
+                password = st.text_input("Password", type="password", key="unified_login_password")
+                if st.button("Continue", type="primary", use_container_width=True, key="unified_login_submit"):
                     try:
-                        user = api_post("/auth/login", {"email": email, "password": password})
-                    except requests.HTTPError as exc:
-                        detail = exc.response.text if exc.response is not None else str(exc)
-                        st.error(f"Login failed: {detail}")
+                        user = api_post("/auth/admin_login", {"email": email, "password": password})
+                    except requests.HTTPError:
+                        try:
+                            user = api_post("/auth/login", {"email": email, "password": password})
+                        except requests.HTTPError as exc:
+                            detail = exc.response.text if exc.response is not None else str(exc)
+                            st.error(f"Login failed: {detail}")
+                        except requests.RequestException as exc:
+                            st.error(f"Login failed: {exc}")
+                        else:
+                            reset_admin_view()
+                            st.session_state["current_user"] = user
+                            st.rerun()
                     except requests.RequestException as exc:
                         st.error(f"Login failed: {exc}")
                     else:
-                        reset_admin_view()
-                        st.session_state["current_user"] = user
+                        reset_citizen_view()
+                        st.session_state["admin_user"] = user
+                        st.session_state["admin_dashboard_bundle"] = None
                         st.rerun()
-                except requests.RequestException as exc:
-                    st.error(f"Login failed: {exc}")
-                else:
-                    reset_citizen_view()
-                    st.session_state["admin_user"] = user
-                    st.session_state["admin_dashboard_bundle"] = None
-                    st.rerun()
-            st.markdown("</div>", unsafe_allow_html=True)
 
         with info_col:
-            st.markdown('<div class="access-card">', unsafe_allow_html=True)
-            st.markdown('<div class="access-mini">Access Routing</div>', unsafe_allow_html=True)
-            st.markdown(
-                """
-                <div class="access-caption">
-                    Use one login form for both roles.
-                    If the credentials belong to an admin account, the app opens the command center.
-                    If they belong to a citizen account, the app opens the citizen portal.
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            st.markdown(
-                f"""
-                <div style="margin-top:18px;padding:14px 16px;border:1px solid rgba(255,255,255,0.08);border-radius:16px;background:rgba(255,255,255,0.025);">
-                    <div class="access-mini" style="margin-bottom:10px;">Admin Demo Access</div>
-                    <div style="font-weight:700;">{DEMO_ADMIN_EMAIL}</div>
-                    <div style="margin-top:6px;font-weight:700;">{DEMO_ADMIN_PASSWORD}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            st.markdown("</div>", unsafe_allow_html=True)
+            with st.container(border=True):
+                st.markdown('<div class="access-mini">Access Routing</div>', unsafe_allow_html=True)
+                st.markdown(
+                    """
+                    <div class="access-caption">
+                        Use one login form for both roles.
+                        If the credentials belong to an admin account, the app opens the command center.
+                        If they belong to a citizen account, the app opens the citizen portal.
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                st.markdown(
+                    f"""
+                    <div style="margin-top:18px;padding:14px 16px;border:1px solid rgba(255,255,255,0.08);border-radius:16px;background:rgba(255,255,255,0.025);">
+                        <div class="access-mini" style="margin-bottom:10px;">Admin Demo Access</div>
+                        <div style="font-weight:700;">{DEMO_ADMIN_EMAIL}</div>
+                        <div style="margin-top:6px;font-weight:700;">{DEMO_ADMIN_PASSWORD}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
 
     else:
         signup_col, info_col = st.columns([1.25, 0.95], gap="large")
         with signup_col:
-            st.markdown('<div class="access-card">', unsafe_allow_html=True)
-            st.markdown('<div class="access-mini">Create Account</div>', unsafe_allow_html=True)
-            name = st.text_input("Full Name", key="citizen_signup_name")
-            sign_email = st.text_input("Email", key="citizen_signup_email")
-            phone = st.text_input("Phone", key="citizen_signup_phone")
-            location = st.text_input("Location", key="citizen_signup_location")
-            password = st.text_input("Password", type="password", key="citizen_signup_password")
-            if st.button("Create Account", type="primary", use_container_width=True, key="citizen_signup_submit"):
-                payload = {
-                    "name": name,
-                    "email": sign_email,
-                    "phone": phone,
-                    "location": location,
-                    "password": password,
-                }
-                try:
-                    user = api_post("/auth/signup", payload)
-                except requests.HTTPError as exc:
-                    detail = exc.response.text if exc.response is not None else str(exc)
-                    st.error(f"Account creation failed: {detail}")
-                except requests.RequestException as exc:
-                    st.error(f"Account creation failed: {exc}")
-                else:
-                    reset_admin_view()
-                    st.session_state["current_user"] = user
-                    st.rerun()
-            st.markdown("</div>", unsafe_allow_html=True)
+            with st.container(border=True):
+                st.markdown('<div class="access-mini">Create Account</div>', unsafe_allow_html=True)
+                name = st.text_input("Full Name", key="citizen_signup_name")
+                sign_email = st.text_input("Email", key="citizen_signup_email")
+                phone = st.text_input("Phone", key="citizen_signup_phone")
+                location = st.text_input("Location", key="citizen_signup_location")
+                password = st.text_input("Password", type="password", key="citizen_signup_password")
+                if st.button("Create Account", type="primary", use_container_width=True, key="citizen_signup_submit"):
+                    payload = {
+                        "name": name,
+                        "email": sign_email,
+                        "phone": phone,
+                        "location": location,
+                        "password": password,
+                    }
+                    try:
+                        user = api_post("/auth/signup", payload)
+                    except requests.HTTPError as exc:
+                        detail = exc.response.text if exc.response is not None else str(exc)
+                        st.error(f"Account creation failed: {detail}")
+                    except requests.RequestException as exc:
+                        st.error(f"Account creation failed: {exc}")
+                    else:
+                        reset_admin_view()
+                        st.session_state["current_user"] = user
+                        st.rerun()
 
         with info_col:
-            st.markdown('<div class="access-card">', unsafe_allow_html=True)
-            st.markdown('<div class="access-mini">New Citizen Account</div>', unsafe_allow_html=True)
-            st.markdown(
-                """
-                <div class="access-caption">
-                    Create a citizen account once and the app will take you directly into complaint reporting,
-                    issue tracking, and local transparency after sign-up is complete.
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            st.markdown("</div>", unsafe_allow_html=True)
+            with st.container(border=True):
+                st.markdown('<div class="access-mini">New Citizen Account</div>', unsafe_allow_html=True)
+                st.markdown(
+                    """
+                    <div class="access-caption">
+                        Create a citizen account once and the app will take you directly into complaint reporting,
+                        issue tracking, and local transparency after sign-up is complete.
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
 
 
 def main() -> None:

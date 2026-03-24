@@ -85,6 +85,24 @@ class VerificationRecord(Base):
     issue: Mapped[IssueRecord] = relationship(back_populates="verification_records")
 
 
+class DispatchAssignmentRecord(Base):
+    __tablename__ = "dispatch_assignments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    cluster_key: Mapped[str] = mapped_column(String(512), unique=True, index=True, nullable=False)
+    cluster_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cluster_title: Mapped[str] = mapped_column(String(255), nullable=False)
+    location: Mapped[str] = mapped_column(String(255), nullable=False)
+    department: Mapped[str] = mapped_column(String(255), nullable=False)
+    team: Mapped[str] = mapped_column(String(255), nullable=False)
+    officer: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(String(64), nullable=False, default="Assigned")
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    assigned_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     _ensure_issue_columns()

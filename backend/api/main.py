@@ -31,7 +31,9 @@ from backend.services.civic_ops_service import (
     build_sla_overview,
     build_zone_performance,
 )
+from backend.services.demo_backfill import backfill_demo_data
 from backend.services.demo_seed import seed_demo_data
+from backend.services.dispatch_service import list_dispatch_assignments, save_dispatch_assignment
 from backend.services.issue_storage import create_issue, list_issues
 from backend.services.prioritization import calculate_priority
 from backend.services.sentiment_service import analyze_sentiment
@@ -72,6 +74,18 @@ class MemoryCase(BaseModel):
     issue_description: str
     action_taken: str
     outcome: str
+
+
+class DispatchAssignmentInput(BaseModel):
+    cluster_id: int | None = None
+    cluster_title: str
+    location: str
+    department: str
+    team: str
+    officer: str
+    status: str
+    notes: str | None = None
+    assigned_by: str | None = None
 
 
 app = FastAPI(title="Governance Memory AI API")
@@ -284,6 +298,18 @@ def health() -> dict[str, str]:
     return {"status": "healthy"}
 
 
+@app.post("/demo_backfill", tags=["meta"])
+def demo_backfill() -> dict[str, object]:
+    summary = backfill_demo_data()
+    with _ANALYTICS_CACHE_LOCK:
+        _ANALYTICS_CACHE["signature"] = None
+        _ANALYTICS_CACHE["bundle"] = None
+    return {
+        "message": "Demo backfill completed without resetting existing records.",
+        "summary": summary,
+    }
+
+
 @app.get("/policy_search", tags=["policy"])
 def policy_search(query: str, date_from: str | None = None, date_to: str | None = None) -> list[dict[str, object]]:
     """Search stored policy PDF documents by keyword (filename + optional PDF content via pypdf). Returns top 10 results sorted by relevance. Optional date filters in YYYY-MM-DD format."""
@@ -449,6 +475,26 @@ def impact_metrics() -> dict[str, object]:
 @app.get("/department_assignments", tags=["analytics"])
 def department_assignments() -> list[dict[str, object]]:
     return build_department_assignments()
+
+
+@app.get("/dispatch_assignments", tags=["operations"])
+def dispatch_assignments() -> list[dict[str, object]]:
+    return list_dispatch_assignments()
+
+
+@app.post("/dispatch_assignment", tags=["operations"])
+def upsert_dispatch_assignment(payload: DispatchAssignmentInput) -> dict[str, object]:
+    return save_dispatch_assignment(
+        cluster_id=payload.cluster_id,
+        cluster_title=payload.cluster_title,
+        location=payload.location,
+        department=payload.department,
+        team=payload.team,
+        officer=payload.officer,
+        status=payload.status,
+        notes=payload.notes,
+        assigned_by=payload.assigned_by,
+    )
 
 
 @app.get("/sla_overview", tags=["analytics"])

@@ -358,52 +358,50 @@ def render_auth_section() -> None:
     col_login, col_signup = st.columns(2)
 
     with col_login:
-        st.markdown('<div class="gm-card">', unsafe_allow_html=True)
-        st.markdown("#### Login")
-        email = st.text_input("Email", key="login_email")
-        password = st.text_input("Password", type="password", key="login_password")
-        if st.button("Login", use_container_width=True):
-            try:
-                user = api_post("/auth/login", {"email": email, "password": password})
-            except requests.HTTPError as exc:
-                detail = exc.response.text if exc.response is not None else str(exc)
-                st.error(f"Login failed: {detail}")
-            except requests.RequestException as exc:
-                st.error(f"Login failed: {exc}")
-            else:
-                st.session_state["current_user"] = user
-                st.success(f"Welcome back, {user.get('name')}.")
-                st.rerun()
-        st.markdown("</div>", unsafe_allow_html=True)
+        with st.container(border=True):
+            st.markdown("#### Login")
+            email = st.text_input("Email", key="login_email")
+            password = st.text_input("Password", type="password", key="login_password")
+            if st.button("Login", use_container_width=True):
+                try:
+                    user = api_post("/auth/login", {"email": email, "password": password})
+                except requests.HTTPError as exc:
+                    detail = exc.response.text if exc.response is not None else str(exc)
+                    st.error(f"Login failed: {detail}")
+                except requests.RequestException as exc:
+                    st.error(f"Login failed: {exc}")
+                else:
+                    st.session_state["current_user"] = user
+                    st.success(f"Welcome back, {user.get('name')}.")
+                    st.rerun()
 
     with col_signup:
-        st.markdown('<div class="gm-card">', unsafe_allow_html=True)
-        st.markdown("#### Sign Up")
-        name = st.text_input("Full Name", key="signup_name")
-        sign_email = st.text_input("Email", key="signup_email")
-        phone = st.text_input("Phone", key="signup_phone")
-        location = st.text_input("Location", key="signup_location")
-        password = st.text_input("Password", type="password", key="signup_password")
-        if st.button("Create Account", use_container_width=True):
-            payload = {
-                "name": name,
-                "email": sign_email,
-                "phone": phone,
-                "location": location,
-                "password": password,
-            }
-            try:
-                user = api_post("/auth/signup", payload)
-            except requests.HTTPError as exc:
-                detail = exc.response.text if exc.response is not None else str(exc)
-                st.error(f"Sign up failed: {detail}")
-            except requests.RequestException as exc:
-                st.error(f"Sign up failed: {exc}")
-            else:
-                st.session_state["current_user"] = user
-                st.success(f"Account created for {user.get('name')}.")
-                st.rerun()
-        st.markdown("</div>", unsafe_allow_html=True)
+        with st.container(border=True):
+            st.markdown("#### Sign Up")
+            name = st.text_input("Full Name", key="signup_name")
+            sign_email = st.text_input("Email", key="signup_email")
+            phone = st.text_input("Phone", key="signup_phone")
+            location = st.text_input("Location", key="signup_location")
+            password = st.text_input("Password", type="password", key="signup_password")
+            if st.button("Create Account", use_container_width=True):
+                payload = {
+                    "name": name,
+                    "email": sign_email,
+                    "phone": phone,
+                    "location": location,
+                    "password": password,
+                }
+                try:
+                    user = api_post("/auth/signup", payload)
+                except requests.HTTPError as exc:
+                    detail = exc.response.text if exc.response is not None else str(exc)
+                    st.error(f"Sign up failed: {detail}")
+                except requests.RequestException as exc:
+                    st.error(f"Sign up failed: {exc}")
+                else:
+                    st.session_state["current_user"] = user
+                    st.success(f"Account created for {user.get('name')}.")
+                    st.rerun()
 
 
 def require_login() -> dict[str, Any] | None:
@@ -482,13 +480,133 @@ def _extract_location(transcript: str, fallback_location: str) -> str:
     return fallback_location
 
 
+def _category_from_text_smart(text: str) -> str | None:
+    lowered = text.lower()
+    for title, aliases in ISSUE_CATEGORY_ALIASES.items():
+        if any(alias in lowered for alias in aliases):
+            return title
+    return None
+
+
+def _extract_location_smart(transcript: str, fallback_location: str) -> str:
+    detected = _extract_location(transcript, fallback_location)
+    if detected and detected != fallback_location:
+        return detected
+
+    patterns = [
+        r"(?:in|near|at|from|around|beside|on)\s+([A-Za-z][A-Za-z\s]{2,40})",
+        r"(?:\u092e\u0947\u0902|\u0915\u0947 \u092a\u093e\u0938|\u0915\u0947 \u0928\u091c\u0926\u0940\u0915)\s+([\u0900-\u097F\w\s-]{2,40})",
+        r"(?:\u098f|\u09a4\u09c7|\u0995\u09be\u099b\u09c7)\s+([\u0980-\u09FF\w\s-]{2,40})",
+        r"(?:\u0bae\u0bc7\u0bb2|\u0b85\u0bb0\u0bc1\u0b95\u0bbf\u0bb2\u0bcd|\u0baa\u0b95\u0bcd\u0b95\u0ba4\u0bcd\u0ba4\u0bbf\u0bb2\u0bcd)\s+([\u0B80-\u0BFF\w\s-]{2,40})",
+        r"(?:\u0c32\u0c4b|\u0c26\u0c17\u0c4d\u0c17\u0c30)\s+([\u0C00-\u0C7F\w\s-]{2,40})",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, transcript, re.IGNORECASE)
+        if match:
+            candidate = re.sub(r"\s+", " ", match.group(1)).strip(" .,-")
+            candidate = re.split(
+                r"\b(?:because|where|there is|and|with|which)\b",
+                candidate,
+                maxsplit=1,
+                flags=re.IGNORECASE,
+            )[0].strip()
+            if len(candidate) >= 3:
+                return candidate.title() if re.search(r"[A-Za-z]", candidate) else candidate
+
+    capitalized_match = re.search(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})\b", transcript)
+    if capitalized_match:
+        candidate = capitalized_match.group(1).strip()
+        if candidate.lower() not in {"water", "garbage", "power", "road", "issue"}:
+            return candidate
+
+    return fallback_location
+
+
+def _severity_signal_score(text: str) -> int:
+    lowered = text.lower()
+    score = 0
+    strong_patterns = [
+        r"\b(emergency|urgent|danger|serious|severe|immediately|accident|injury|burst|flood|outage)\b",
+        r"\b(no water|power cut|electricity gone|road blocked|sewer overflow|short circuit)\b",
+        r"\b(child|school|hospital|ambulance|traffic)\b",
+        r"[\u0906\u092a\u093e\u0924\u0915\u093e\u0932\u0924\u0941\u0930\u0902\u0924\u0916\u0924\u0930\u093e\u0917\u0902\u092d\u0940\u0930]",
+        r"[\u09b0\u09c1\u09b0\u09bf\u09ac\u09bf\u09aa\u09a6]",
+        r"[\u0B86\u0BAA\u0BA4\u0BCD\u0BA4\u0BC1\u0B85\u0BB5\u0B9A\u0BB0]",
+        r"[\u0C24\u0C15\u0C4D\u0C37\u0C23\u0C2A\u0C4D\u0C30\u0C2E\u0C3E\u0C26]",
+    ]
+    medium_patterns = [
+        r"\b(overflow|pothole|delay|leak|garbage|unclean|broken|issue|problem|blocked)\b",
+        r"\b(since morning|for hours|for days|still not fixed)\b",
+        r"[\u0932\u0940\u0915\u0915\u091A\u0930\u093E\u0917\u0921\u094D\u0922\u093E\u0938\u092E\u0938\u094D\u092F]",
+        r"[\u09B8\u09AE\u09B8\u09CD\u09AF\u09BE\u0986\u09AC\u09B0\u09CD\u099C\u09A8\u09BE]",
+        r"[\u0B95\u0BC1\u0BAA\u0BCD\u0BAA\u0BC8\u0B9A\u0BBF\u0BB5\u0BC1]",
+        r"[\u0C38\u0C2E\u0C38\u0C4D\u0C2F]",
+    ]
+    for pattern in strong_patterns:
+        if re.search(pattern, lowered, re.IGNORECASE):
+            score += 3
+    for pattern in medium_patterns:
+        if re.search(pattern, lowered, re.IGNORECASE):
+            score += 1
+    return score
+
+
+def _suggest_urgency_smart(transcript: str) -> str:
+    lowered = transcript.lower()
+    severity_score = _severity_signal_score(transcript)
+    category = _category_from_text_smart(transcript) or ""
+
+    if any(term in lowered for term in HIGH_URGENCY_ALIASES):
+        severity_score += 3
+    if any(term in lowered for term in MEDIUM_URGENCY_ALIASES):
+        severity_score += 1
+
+    if category in {"Water Supply Issue", "Water Pipeline Issue", "Power Supply Issue", "Sewage Issue", "Drainage Issue"}:
+        severity_score += 1
+
+    if category in {"Road Pothole Issue", "Streetlight Issue"} and re.search(
+        r"\b(night|traffic|school|hospital|accident)\b",
+        lowered,
+        re.IGNORECASE,
+    ):
+        severity_score += 2
+
+    if severity_score >= 5:
+        return "High"
+    if severity_score >= 2:
+        return "Medium"
+    return "Low"
+
+
+def _suggest_issue_title_smart(transcript: str) -> str:
+    cleaned = re.sub(r"\s+", " ", transcript).strip()
+    detected_location = _extract_location_smart(cleaned, "")
+    category = _category_from_text_smart(cleaned)
+    if category:
+        return f"{category} - {detected_location}" if detected_location else category
+
+    words = re.findall(r"\w+", cleaned, re.UNICODE)
+    if not words:
+        return "Civic Issue Report"
+    summary = " ".join(words[:5]).strip().title()
+    return f"{summary} - {detected_location}" if detected_location else summary
+
+
 def _apply_voice_draft(transcript: str) -> None:
     cleaned_transcript = transcript.strip()
     if not cleaned_transcript:
         return
 
+    fallback_location = str(
+        st.session_state.get("issue_location_draft")
+        or st.session_state.get("current_user", {}).get("location", "")
+    ).strip()
+    suggested_title = _suggest_issue_title_smart(cleaned_transcript)
+    suggested_urgency = _suggest_urgency_smart(cleaned_transcript)
+    detected_location = _extract_location_smart(cleaned_transcript, fallback_location)
+
     if not str(st.session_state.get("issue_title_draft", "")).strip():
-        st.session_state["issue_title_draft"] = _suggest_issue_title(cleaned_transcript)
+        st.session_state["issue_title_draft"] = suggested_title
 
     existing_description = str(st.session_state.get("issue_description_draft", "")).strip()
     if not existing_description:
@@ -497,15 +615,9 @@ def _apply_voice_draft(transcript: str) -> None:
         st.session_state["issue_description_draft"] = f"{existing_description}\n\nVoice note:\n{cleaned_transcript}"
 
     current_urgency = str(st.session_state.get("issue_urgency_draft", "Medium"))
-    suggested_urgency = _suggest_urgency(cleaned_transcript)
     if current_urgency in {"", "Low", "Medium"} or suggested_urgency == "High":
         st.session_state["issue_urgency_draft"] = suggested_urgency
 
-    fallback_location = str(
-        st.session_state.get("issue_location_draft")
-        or st.session_state.get("current_user", {}).get("location", "")
-    ).strip()
-    detected_location = _extract_location(cleaned_transcript, fallback_location)
     if detected_location:
         st.session_state["issue_location_draft"] = detected_location
 
@@ -597,11 +709,11 @@ def render_voice_input() -> None:
     if transcript:
         draft_cols = st.columns(3)
         with draft_cols[0]:
-            st.caption(f"Suggested title: **{_suggest_issue_title(transcript)}**")
+            st.caption(f"Suggested title: **{_suggest_issue_title_smart(transcript)}**")
         with draft_cols[1]:
-            st.caption(f"Suggested urgency: **{_suggest_urgency(transcript)}**")
+            st.caption(f"Suggested urgency: **{_suggest_urgency_smart(transcript)}**")
         with draft_cols[2]:
-            preview_location = _extract_location(
+            preview_location = _extract_location_smart(
                 transcript,
                 str(st.session_state.get("issue_location_draft", "")).strip() or "Current account location",
             )
@@ -942,11 +1054,9 @@ def main() -> None:
     if user is None:
         return
 
-    st.markdown('<div class="gm-tabs">', unsafe_allow_html=True)
     tab_submit, tab_feed, tab_transparency, tab_policy = st.tabs(
         ["Report Issue", "Track Reports", "Local Transparency", "Policy Lookup"]
     )
-    st.markdown("</div>", unsafe_allow_html=True)
 
     with tab_submit:
         render_issue_submission(user)

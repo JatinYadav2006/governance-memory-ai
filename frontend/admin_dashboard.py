@@ -1,6 +1,7 @@
 import pandas as pd
 import plotly.express as px
 import requests
+import re
 import streamlit as st
 
 
@@ -42,6 +43,36 @@ def _confidence_label(score: float) -> str:
     return "Low confidence"
 
 
+def _sentence_points(text: str, max_points: int = 3) -> list[str]:
+    normalized = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not normalized:
+        return []
+    parts = [part.strip(" -") for part in re.split(r"(?<=[.!?])\s+", normalized) if part.strip()]
+    compact_parts: list[str] = []
+    for part in parts:
+        cleaned = part.strip()
+        if cleaned.endswith((".", "!", "?")):
+            cleaned = cleaned[:-1].strip()
+        if cleaned:
+            compact_parts.append(cleaned)
+    return compact_parts[:max_points]
+
+
+def _first_sentence(text: str, fallback: str = "No summary available.") -> str:
+    points = _sentence_points(text, max_points=1)
+    return points[0] if points else fallback
+
+
+def _render_point_block(title: str, text: str, empty_text: str = "No details available.") -> None:
+    st.markdown(f"**{title}**")
+    points = _sentence_points(text)
+    if not points:
+        st.caption(empty_text)
+        return
+    for point in points:
+        st.markdown(f"- {point}")
+
+
 def apply_page_style() -> None:
     if not st.session_state.get("use_unified_access"):
         st.set_page_config(page_title="Admin Dashboard - Governance Memory AI", layout="wide")
@@ -73,6 +104,7 @@ def apply_page_style() -> None:
             box-shadow: 0 24px 60px rgba(0,0,0,0.28);
             position: relative;
             overflow: hidden;
+            margin-bottom: 20px;
         }
         .gm-metric {
             border: 1px solid rgba(255,255,255,0.10);
@@ -148,6 +180,36 @@ def apply_page_style() -> None:
             border-radius: 18px;
             padding: 16px 18px;
             background: rgba(255,255,255,0.03);
+        }
+        .gm-chip-row {
+            display:flex;
+            flex-wrap:wrap;
+            gap:8px;
+            margin-top:10px;
+        }
+        .gm-chip {
+            display:inline-flex;
+            align-items:center;
+            padding:6px 10px;
+            border-radius:999px;
+            border:1px solid rgba(255,255,255,0.10);
+            background:rgba(255,255,255,0.04);
+            color:rgba(255,255,255,0.82);
+            font-size:0.78rem;
+            font-weight:700;
+            letter-spacing:0.02em;
+        }
+        .gm-cluster-preview {
+            border: 1px solid rgba(255,255,255,0.09);
+            border-radius: 18px;
+            padding: 14px 16px;
+            background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.018));
+            margin-top: 10px;
+        }
+        .gm-detail-shell {
+            border-top: 1px solid rgba(255,255,255,0.08);
+            margin-top: 14px;
+            padding-top: 14px;
         }
         .gm-console-grid {
             display: grid;
@@ -247,6 +309,42 @@ def apply_page_style() -> None:
             border-top: 1px solid rgba(255,255,255,0.08);
             padding-top: 26px;
         }
+        .gm-login-strip {
+            margin: 6px 0 24px 0;
+            padding-bottom: 10px;
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+        }
+        .gm-war-summary-grid {
+            display: grid;
+            grid-template-columns: 1.1fr 1fr 0.9fr 0.9fr;
+            gap: 16px;
+            margin: 18px 0 12px 0;
+            align-items: stretch;
+        }
+        .gm-war-columns {
+            display: grid;
+            grid-template-columns: 1.15fr 0.85fr;
+            gap: 18px;
+            align-items: start;
+            margin-top: 10px;
+        }
+        .gm-muted-note {
+            color: rgba(255,255,255,0.66);
+            line-height: 1.65;
+            margin-top: 12px;
+        }
+        .gm-divider {
+            height: 1px;
+            background: rgba(255,255,255,0.08);
+            margin: 18px 0;
+        }
+        .gm-soft-panel {
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 20px;
+            padding: 18px 18px 12px 18px;
+            background: rgba(255,255,255,0.03);
+            margin-bottom: 16px;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -312,6 +410,7 @@ def render_subworkspace_switch(title: str, options: list[str], key: str) -> str:
 def render_login() -> dict | None:
     user = st.session_state.get("admin_user")
     if user is not None:
+        st.markdown('<div class="gm-login-strip">', unsafe_allow_html=True)
         cols = st.columns([4, 1, 1])
         with cols[0]:
             st.markdown(
@@ -327,6 +426,7 @@ def render_login() -> dict | None:
                 st.session_state["generated_update"] = ""
                 st.session_state["admin_dashboard_bundle"] = None
                 st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
         return user
 
     st.markdown("### Admin Access")
@@ -690,6 +790,7 @@ def render_department_assignment_board(assignments: list[dict], sla_overview: di
                 "department",
                 "team",
                 "officer",
+                "dispatch_status",
                 "sla_hours",
             ] if col in df.columns
         ]
@@ -859,37 +960,50 @@ def render_cluster_console(
             with top_cols[2]:
                 st.metric("Confidence", _confidence_label(confidence_score))
 
-            preview_left, preview_right = st.columns([1.2, 0.8])
+            st.markdown(
+                f"""
+                <div class="gm-chip-row">
+                    <div class="gm-chip">Location: {location}</div>
+                    <div class="gm-chip">Linked complaints: {issue_count}</div>
+                    <div class="gm-chip">Confidence: {_confidence_label(confidence_score)}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            st.markdown('<div class="gm-cluster-preview">', unsafe_allow_html=True)
+            preview_left, preview_right = st.columns([1.12, 0.88], gap="large")
             with preview_left:
                 st.markdown("**Live Insight**")
-                st.write(insight.get("insight", "No AI insight available yet."))
+                st.write(_first_sentence(str(insight.get("insight", "")), "No AI insight available yet."))
             with preview_right:
                 st.markdown("**Immediate Focus**")
-                st.write(top_recommendation)
-                st.caption(memory_summary)
-                if evidence_terms:
-                    st.caption(f"Evidence terms: {', '.join(str(term) for term in evidence_terms)}")
+                st.write(_first_sentence(str(top_recommendation), "Awaiting recommended action set."))
+                st.caption(f"Historical anchor: {memory_summary}")
+            if evidence_terms:
+                st.caption(f"Evidence terms: {', '.join(str(term) for term in evidence_terms[:6])}")
+            st.markdown("</div>", unsafe_allow_html=True)
 
             with st.expander("View Details"):
-                info_cols = st.columns(4)
+                st.markdown('<div class="gm-detail-shell">', unsafe_allow_html=True)
+                info_cols = st.columns(2, gap="large")
                 with info_cols[0]:
-                    st.markdown("**Issue IDs**")
+                    st.markdown("**Cluster Snapshot**")
                     if issue_ids:
-                        st.code(", ".join(str(issue_id) for issue_id in issue_ids), language="text")
+                        st.caption(
+                            f"{len(issue_ids)} linked complaints"
+                            + (" | " + ", ".join(f'#{issue_id}' for issue_id in issue_ids[:8]) if issue_ids else "")
+                            + (" ..." if len(issue_ids) > 8 else "")
+                        )
                     else:
                         st.caption("No complaint IDs available.")
-                with info_cols[1]:
                     st.markdown("**Cluster Confidence**")
                     st.write(f"{confidence_score:.2f} | {_confidence_label(confidence_score)}")
                     if evidence_terms:
                         st.caption(", ".join(str(term) for term in evidence_terms))
                     else:
                         st.caption("No evidence terms available.")
-                with info_cols[2]:
-                    st.markdown("**AI Insight**")
-                    st.write(insight.get("insight", "No AI insight available yet."))
-                    st.caption(insight.get("evidence_note", ""))
-                with info_cols[3]:
+                with info_cols[1]:
                     st.markdown("**Governance Memory**")
                     similar_case = memory_item.get("similar_case")
                     if similar_case:
@@ -899,16 +1013,33 @@ def render_cluster_console(
                     else:
                         st.caption("No similar resolved case found yet.")
 
-                st.markdown("**AI Recommendations**")
-                items = recommendation.get("recommendations", [])
-                if items:
-                    for item in items:
-                        st.markdown(f"- {item}")
-                    rationale = recommendation.get("rationale")
-                    if rationale:
-                        st.caption(rationale)
+                detail_left, detail_right = st.columns([1, 1], gap="large")
+                with detail_left:
+                    _render_point_block(
+                        "AI Insight",
+                        str(insight.get("insight", "")),
+                        empty_text="No AI insight available yet.",
+                    )
+                    evidence_note = str(insight.get("evidence_note", "") or "").strip()
+                    if evidence_note:
+                        st.caption(evidence_note)
+                with detail_right:
+                    st.markdown("**AI Recommendations**")
+                    items = recommendation.get("recommendations", [])
+                    if items:
+                        for item in items:
+                            st.markdown(f"- {item}")
+                    else:
+                        st.caption("No AI recommendations available yet.")
+
+                st.markdown("**Recommendation Rationale**")
+                rationale = recommendation.get("rationale")
+                if rationale:
+                    for point in _sentence_points(str(rationale), max_points=3):
+                        st.markdown(f"- {point}")
                 else:
-                    st.caption("No AI recommendations available yet.")
+                    st.caption("No rationale available yet.")
+                st.markdown("</div>", unsafe_allow_html=True)
             st.markdown("</div>", unsafe_allow_html=True)
 
 
@@ -996,7 +1127,7 @@ def render_war_room(clusters: list[dict]) -> None:
     )
 
     summary_items = [
-        ("Situation Read", war_room.get("insight", "No situational insight available.")),
+        ("Situation Read", _first_sentence(str(war_room.get("insight", "")), "No situational insight available.")),
         ("Recommended First Move", (war_room.get("action_plan") or ["No immediate action plan available."])[0]),
         (
             "Historical Anchor",
@@ -1007,76 +1138,74 @@ def render_war_room(clusters: list[dict]) -> None:
             f"{float(war_room.get('confidence_score', 0.0) or 0.0):.2f} | {_confidence_label(float(war_room.get('confidence_score', 0.0) or 0.0))}",
         ),
     ]
+    st.markdown('<div class="gm-war-summary-grid">', unsafe_allow_html=True)
     summary_cols = st.columns(len(summary_items))
     for col, (label, value) in zip(summary_cols, summary_items):
         with col:
             st.markdown(
                 f"""
-                <div class="gm-card">
+                <div class="gm-card" style="height:100%;margin-bottom:0;">
                     <div class="gm-mini">{label}</div>
-                    <div style="margin-top:8px;line-height:1.55;font-weight:600;">{value}</div>
+                    <div style="margin-top:10px;line-height:1.65;font-weight:600;">{value}</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
+    st.markdown("</div>", unsafe_allow_html=True)
     evidence_terms = war_room.get("evidence_terms") or []
     if evidence_terms:
-        st.caption(f"Cluster evidence terms: {', '.join(str(term) for term in evidence_terms)}")
+        st.markdown(
+            f'<div class="gm-muted-note"><strong>Cluster evidence terms:</strong> {", ".join(str(term) for term in evidence_terms)}</div>',
+            unsafe_allow_html=True,
+        )
     if war_room.get("evidence_summary"):
-        st.caption(str(war_room.get("evidence_summary")))
+        st.markdown(
+            f'<div class="gm-muted-note">{str(war_room.get("evidence_summary"))}</div>',
+            unsafe_allow_html=True,
+        )
 
-    left, right = st.columns([1.2, 0.8])
+    st.markdown('<div class="gm-divider"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="gm-war-columns">', unsafe_allow_html=True)
+    left, right = st.columns([1.2, 0.8], gap="large")
     with left:
         st.markdown("#### Agent Deliberation")
         for agent in war_room.get("agents", []):
-            st.markdown(
-                f"""
-                <div class="gm-card">
-                    <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
-                        <div style="font-weight:800;">{agent.get("agent", "AI Agent")}</div>
-                        <div style="font-size:0.8rem;text-transform:uppercase;letter-spacing:0.08em;color:#7dd3fc;">
-                            {agent.get("headline", "Assessment")}
-                        </div>
-                    </div>
-                    <div style="margin-top:10px;color:rgba(255,255,255,0.84);line-height:1.6;">
-                        {agent.get("assessment", "No assessment available.")}
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+            with st.container(border=True):
+                top_left, top_right = st.columns([1.3, 0.7])
+                with top_left:
+                    st.markdown(f"**{agent.get('agent', 'AI Agent')}**")
+                with top_right:
+                    st.caption(str(agent.get("headline", "Assessment")).upper())
+                _render_point_block(
+                    "Assessment",
+                    str(agent.get("assessment", "")),
+                    empty_text="No assessment available.",
+                )
 
     with right:
         st.markdown("#### Action Stack")
         action_plan = war_room.get("action_plan", [])
         if action_plan:
             for idx, action in enumerate(action_plan, start=1):
-                st.markdown(
-                    f"""
-                    <div class="gm-card">
-                        <div class="gm-mini">Action {idx:02d}</div>
-                        <div style="margin-top:8px;font-weight:700;line-height:1.55;">{action}</div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
+                with st.container(border=True):
+                    st.caption(f"Action {idx:02d}")
+                    _render_point_block("Operational Step", str(action), empty_text="No action available.")
         else:
             st.info("No action plan available yet.")
 
         memory_match = war_room.get("memory_match") or {}
         if memory_match:
             st.markdown("#### Historical Anchor")
-            st.markdown(
-                f"""
-                <div class="gm-card">
-                    <div style="font-weight:800;">{memory_match.get("similar_case_title", "Resolved Case")}</div>
-                    <div style="margin-top:8px;color:rgba(255,255,255,0.76);">{memory_match.get("location", "Unknown")}</div>
-                    <div style="margin-top:10px;"><strong>Action Taken:</strong> {memory_match.get("action_taken", "No action recorded")}</div>
-                    <div style="margin-top:8px;"><strong>Similarity:</strong> {memory_match.get("similarity_score", 0.0)}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+            with st.container(border=True):
+                st.markdown(f"**{memory_match.get('similar_case_title', 'Resolved Case')}**")
+                st.caption(str(memory_match.get("location", "Unknown")))
+                _render_point_block(
+                    "Past Action Taken",
+                    str(memory_match.get("action_taken", "")),
+                    empty_text="No action recorded.",
+                )
+                st.caption(f"Similarity: {memory_match.get('similarity_score', 0.0)}")
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def render_social_pulse(social_pulse: dict) -> None:
@@ -1274,6 +1403,76 @@ def render_public_update_generator(issues: list[dict]) -> None:
         st.text_area("Generated public statement", st.session_state["generated_update"], height=180)
 
 
+def render_dispatch_assignment_form(assignments: list[dict], admin_user: dict | None) -> None:
+    st.markdown("#### Dispatch Assignment")
+    st.caption("Convert AI-suggested routing into a saved department assignment with officer ownership and live status.")
+    if not assignments:
+        st.info("No active clusters are available for dispatch assignment.")
+        return
+
+    def format_assignment(item: dict) -> str:
+        return (
+            f"#{item.get('cluster_id', 'N/A')} | "
+            f"{item.get('cluster_title', 'Recurring Civic Issue')} | "
+            f"{item.get('location', 'Unknown')} | "
+            f"{item.get('issue_count', 0)} issues"
+        )
+
+    with st.form("dispatch_assignment_form"):
+        selected_assignment = st.selectbox(
+            "Select cluster",
+            assignments[: min(len(assignments), 25)],
+            format_func=format_assignment,
+        )
+        default_department = str(selected_assignment.get("department", "City Operations Desk"))
+        default_team = str(selected_assignment.get("team", "General Civic Response Unit"))
+        default_officer = str(selected_assignment.get("officer", "Ward Coordination Lead"))
+        default_status = str(selected_assignment.get("dispatch_status", "Assigned"))
+
+        col1, col2 = st.columns(2)
+        with col1:
+            department = st.text_input("Department", value=default_department)
+            team = st.text_input("Team", value=default_team)
+        with col2:
+            officer = st.text_input("Officer", value=default_officer)
+            status = st.selectbox(
+                "Dispatch Status",
+                ["Assigned", "In Progress", "Escalated", "Completed"],
+                index=["Assigned", "In Progress", "Escalated", "Completed"].index(default_status)
+                if default_status in {"Assigned", "In Progress", "Escalated", "Completed"}
+                else 0,
+            )
+
+        notes = st.text_area(
+            "Dispatch Notes",
+            value=str(selected_assignment.get("dispatch_notes", "") or ""),
+            placeholder="Add field instructions, escalation notes, or operational context.",
+            height=110,
+        )
+        submitted = st.form_submit_button("Save Dispatch Assignment", type="primary")
+
+        if submitted:
+            payload = {
+                "cluster_id": selected_assignment.get("cluster_id"),
+                "cluster_title": selected_assignment.get("cluster_title", ""),
+                "location": selected_assignment.get("location", ""),
+                "department": department.strip(),
+                "team": team.strip(),
+                "officer": officer.strip(),
+                "status": status,
+                "notes": notes.strip() or None,
+                "assigned_by": (admin_user or {}).get("name", "Admin Operator"),
+            }
+            try:
+                api_post("/dispatch_assignment", payload)
+            except requests.RequestException as exc:
+                st.error(f"Unable to save dispatch assignment: {exc}")
+            else:
+                st.session_state["admin_dashboard_bundle"] = None
+                st.success("Dispatch assignment saved successfully.")
+                st.rerun()
+
+
 def render_work_verification_upload(clusters: list[dict]) -> None:
     st.markdown("#### Work Verification Upload")
     st.caption("Close an entire complaint cluster with one proof-of-work submission so the linked active issues move together into resolved history.")
@@ -1347,133 +1546,151 @@ def render_work_verification_upload(clusters: list[dict]) -> None:
 def render_record_tables(issues: list[dict], resolved_issues: list[dict]) -> None:
     st.markdown("#### Operations Records")
     st.caption("Search active complaints, resolved history, and verification evidence without letting long lists overwhelm the page.")
-    issue_col, verification_col = st.columns(2)
+    st.markdown("")
+    issue_col, verification_col = st.columns([1, 1], gap="large")
 
     with issue_col:
-        active_tab, history_tab = st.tabs(["Active Complaints", "Resolved History"])
+        with st.container(border=True):
+            active_tab, history_tab = st.tabs(["Active Complaints", "Resolved History"])
 
-        with active_tab:
-            st.markdown("#### Active Complaints")
-            search = st.text_input("Filter active issues", placeholder="Search title or location", key="issue_table_search")
-            show_count = st.selectbox(
-                "Show active",
-                _count_options(len(issues), [10, 25, 50]),
-                key="issue_table_count",
-            )
-            filtered = issues
-            if search.strip():
-                term = search.strip().lower()
-                filtered = [
-                    issue
-                    for issue in issues
-                    if term in str(issue.get("title", "")).lower() or term in str(issue.get("location", "")).lower()
-                ]
-            if filtered:
-                df = pd.DataFrame(filtered[:show_count])
-                cols = [col for col in ["id", "title", "location", "urgency", "priority_score"] if col in df.columns]
-                st.dataframe(df[cols], use_container_width=True, hide_index=True, height=370)
-            else:
-                st.info("No matching active complaints.")
+            with active_tab:
+                st.markdown("#### Active Complaints")
+                filter_col, count_col = st.columns([1.5, 0.8], gap="medium")
+                with filter_col:
+                    search = st.text_input("Filter active issues", placeholder="Search title or location", key="issue_table_search")
+                with count_col:
+                    show_count = st.selectbox(
+                        "Show active",
+                        _count_options(len(issues), [10, 25, 50]),
+                        key="issue_table_count",
+                    )
+                filtered = issues
+                if search.strip():
+                    term = search.strip().lower()
+                    filtered = [
+                        issue
+                        for issue in issues
+                        if term in str(issue.get("title", "")).lower() or term in str(issue.get("location", "")).lower()
+                    ]
+                if filtered:
+                    df = pd.DataFrame(filtered[:show_count])
+                    cols = [col for col in ["id", "title", "location", "urgency", "priority_score"] if col in df.columns]
+                    st.dataframe(df[cols], use_container_width=True, hide_index=True, height=370)
+                else:
+                    st.info("No matching active complaints.")
 
-        with history_tab:
-            st.markdown("#### Resolved History")
-            search = st.text_input(
-                "Filter resolved issues",
-                placeholder="Search title or location",
-                key="resolved_issue_table_search",
-            )
-            show_count = st.selectbox(
-                "Show resolved",
-                _count_options(len(resolved_issues), [10, 25, 50]),
-                key="resolved_issue_table_count",
-            )
-            filtered = resolved_issues
-            if search.strip():
-                term = search.strip().lower()
-                filtered = [
-                    issue
-                    for issue in resolved_issues
-                    if term in str(issue.get("title", "")).lower() or term in str(issue.get("location", "")).lower()
-                ]
-            if filtered:
-                df = pd.DataFrame(filtered[:show_count])
-                cols = [col for col in ["id", "title", "location", "urgency", "status", "priority_score"] if col in df.columns]
-                st.dataframe(df[cols], use_container_width=True, hide_index=True, height=370)
-            else:
-                st.info("No resolved complaints yet.")
+            with history_tab:
+                st.markdown("#### Resolved History")
+                filter_col, count_col = st.columns([1.5, 0.8], gap="medium")
+                with filter_col:
+                    search = st.text_input(
+                        "Filter resolved issues",
+                        placeholder="Search title or location",
+                        key="resolved_issue_table_search",
+                    )
+                with count_col:
+                    show_count = st.selectbox(
+                        "Show resolved",
+                        _count_options(len(resolved_issues), [10, 25, 50]),
+                        key="resolved_issue_table_count",
+                    )
+                filtered = resolved_issues
+                if search.strip():
+                    term = search.strip().lower()
+                    filtered = [
+                        issue
+                        for issue in resolved_issues
+                        if term in str(issue.get("title", "")).lower() or term in str(issue.get("location", "")).lower()
+                    ]
+                if filtered:
+                    df = pd.DataFrame(filtered[:show_count])
+                    cols = [col for col in ["id", "title", "location", "urgency", "status", "priority_score"] if col in df.columns]
+                    st.dataframe(df[cols], use_container_width=True, hide_index=True, height=370)
+                else:
+                    st.info("No resolved complaints yet.")
 
     with verification_col:
-        st.markdown("#### Verification Records")
-        try:
-            payload = api_get("/verifications")
-            records = payload.get("verifications", []) if isinstance(payload, dict) else []
-        except requests.RequestException as exc:
-            st.warning(f"Unable to load verification records: {exc}")
-            return
+        with st.container(border=True):
+            st.markdown("#### Verification Records")
+            try:
+                payload = api_get("/verifications")
+                records = payload.get("verifications", []) if isinstance(payload, dict) else []
+            except requests.RequestException as exc:
+                st.warning(f"Unable to load verification records: {exc}")
+                return
 
-        search = st.text_input(
-            "Filter verifications",
-            placeholder="Search location or action taken",
-            key="verification_table_search",
-        )
-        show_count = st.selectbox(
-            "Show verifications",
-            _count_options(len(records), [10, 25, 50]),
-            key="verification_table_count",
-        )
-        grouped_records: list[dict] = []
-        grouped_index: dict[tuple[str, str, str, str], dict] = {}
-        for record in records:
-            key = (
-                str(record.get("location", "")),
-                str(record.get("action_taken", "")),
-                str(record.get("timestamp", "")),
-                str(record.get("image_filename", "")),
-            )
-            existing = grouped_index.get(key)
-            if existing is None:
-                existing = {
-                    "location": record.get("location", ""),
-                    "action_taken": record.get("action_taken", ""),
-                    "timestamp": record.get("timestamp", ""),
-                    "image_filename": record.get("image_filename", ""),
-                    "issue_count": 0,
-                    "issue_ids": [],
-                }
-                grouped_index[key] = existing
-                grouped_records.append(existing)
-
-            existing["issue_count"] += 1
-            existing["issue_ids"].append(record.get("issue_id"))
-
-        filtered_records = grouped_records
-        if search.strip():
-            term = search.strip().lower()
-            filtered_records = [
-                record
-                for record in grouped_records
-                if term in str(record.get("location", "")).lower()
-                or term in str(record.get("action_taken", "")).lower()
-                or term in ", ".join(str(issue_id) for issue_id in record.get("issue_ids", [])).lower()
-            ]
-        if filtered_records:
-            df = pd.DataFrame(filtered_records[:show_count])
-            if "issue_ids" in df.columns:
-                df["issue_ids"] = df["issue_ids"].apply(
-                    lambda issue_ids: ", ".join(f"#{issue_id}" for issue_id in issue_ids[:8])
-                    + (" ..." if len(issue_ids) > 8 else "")
+            filter_col, count_col = st.columns([1.5, 0.8], gap="medium")
+            with filter_col:
+                search = st.text_input(
+                    "Filter verifications",
+                    placeholder="Search location or action taken",
+                    key="verification_table_search",
                 )
-            cols = [
-                col
-                for col in ["issue_count", "issue_ids", "location", "action_taken", "timestamp", "image_filename"]
-                if col in df.columns
-            ]
-            st.dataframe(df[cols], use_container_width=True, hide_index=True, height=430)
-        else:
-            st.info("No matching verification records.")
+            with count_col:
+                show_count = st.selectbox(
+                    "Show verifications",
+                    _count_options(len(records), [10, 25, 50]),
+                    key="verification_table_count",
+                )
+            grouped_records: list[dict] = []
+            grouped_index: dict[tuple[str, str, str, str], dict] = {}
+            for record in records:
+                key = (
+                    str(record.get("location", "")),
+                    str(record.get("action_taken", "")),
+                    str(record.get("timestamp", "")),
+                    str(record.get("image_filename", "")),
+                )
+                existing = grouped_index.get(key)
+                if existing is None:
+                    existing = {
+                        "location": record.get("location", ""),
+                        "action_taken": record.get("action_taken", ""),
+                        "timestamp": record.get("timestamp", ""),
+                        "image_filename": record.get("image_filename", ""),
+                        "issue_count": 0,
+                        "issue_ids": [],
+                    }
+                    grouped_index[key] = existing
+                    grouped_records.append(existing)
+
+                existing["issue_count"] += 1
+                existing["issue_ids"].append(record.get("issue_id"))
+
+            filtered_records = grouped_records
+            if search.strip():
+                term = search.strip().lower()
+                filtered_records = [
+                    record
+                    for record in grouped_records
+                    if term in str(record.get("location", "")).lower()
+                    or term in str(record.get("action_taken", "")).lower()
+                    or term in ", ".join(str(issue_id) for issue_id in record.get("issue_ids", [])).lower()
+                ]
+            if filtered_records:
+                df = pd.DataFrame(filtered_records[:show_count])
+                if "issue_ids" in df.columns:
+                    df["issue_ids"] = df["issue_ids"].apply(
+                        lambda issue_ids: ", ".join(f"#{issue_id}" for issue_id in issue_ids[:8])
+                        + (" ..." if len(issue_ids) > 8 else "")
+                    )
+                cols = [
+                    col
+                    for col in ["issue_count", "issue_ids", "location", "action_taken", "timestamp", "image_filename"]
+                    if col in df.columns
+                ]
+                st.dataframe(df[cols], use_container_width=True, hide_index=True, height=430)
+            else:
+                st.info("No matching verification records.")
 
 
-def render_operations_desk(issues: list[dict], resolved_issues: list[dict], clusters: list[dict]) -> None:
+def render_operations_desk(
+    issues: list[dict],
+    resolved_issues: list[dict],
+    clusters: list[dict],
+    assignments: list[dict],
+    admin_user: dict | None,
+) -> None:
     st.markdown('<div class="gm-section-title">Operations Desk</div>', unsafe_allow_html=True)
     st.markdown(
         '<div class="gm-section-subtitle">Run public communication, submit work verification, and inspect operational records from one tighter workspace.</div>',
@@ -1483,18 +1700,24 @@ def render_operations_desk(issues: list[dict], resolved_issues: list[dict], clus
     action_tab, records_tab = st.tabs(["Response Actions", "Records Console"])
 
     with action_tab:
-        ops_left, ops_right = st.columns([1, 1])
+        st.markdown("")
+        ops_left, ops_right = st.columns([1.05, 0.95], gap="large")
         with ops_left:
-            st.markdown('<div class="gm-panel">', unsafe_allow_html=True)
-            render_public_update_generator(issues)
-            st.markdown("</div>", unsafe_allow_html=True)
+            st.caption("Communication and dispatch planning")
+            with st.container(border=True):
+                render_public_update_generator(issues)
+            st.markdown("")
+            with st.container(border=True):
+                render_dispatch_assignment_form(assignments, admin_user)
         with ops_right:
-            st.markdown('<div class="gm-panel">', unsafe_allow_html=True)
-            render_work_verification_upload(clusters)
-            st.markdown("</div>", unsafe_allow_html=True)
+            st.caption("Resolution closure and proof-of-work")
+            with st.container(border=True):
+                render_work_verification_upload(clusters)
 
     with records_tab:
-        render_record_tables(issues, resolved_issues)
+        st.markdown("")
+        with st.container(border=True):
+            render_record_tables(issues, resolved_issues)
 
 
 def render_cluster_intelligence(
@@ -1637,7 +1860,7 @@ def main() -> None:
     elif workspace == "Policy Management":
         render_policy_management()
     else:
-        render_operations_desk(issues, resolved_issues, clusters)
+        render_operations_desk(issues, resolved_issues, clusters, department_assignments, user)
     st.markdown("</div>", unsafe_allow_html=True)
 
 
