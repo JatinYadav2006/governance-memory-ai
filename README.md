@@ -1,4 +1,4 @@
-````markdown
+
 # Governance Memory AI
 
 Governance Memory AI is an **AI-assisted civic operations platform** that helps governments move from **complaint intake** to **clustered intelligence**, **crisis awareness**, **response planning**, **verification**, and **institutional memory**.
